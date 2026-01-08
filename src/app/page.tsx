@@ -451,7 +451,9 @@ export default function Home() {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Kolor / trudność</label>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+              Kolor / trudność
+            </label>
             <select
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value as any)}
@@ -476,7 +478,9 @@ export default function Home() {
                 <b style={{ color: "#64748b" }}>{difficultyLabel(difficulty)}</b>
               </div>
             ) : (
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Trasy + otwarte km liczone dla wszystkich tras.</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                Trasy + otwarte km liczone dla wszystkich tras.
+              </div>
             )}
 
             {/* ✅ sortowanie (bez resetu trudności) */}
@@ -512,14 +516,16 @@ export default function Home() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
           <div style={{ color: "#64748b", fontSize: 12 }}>
-            Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona{" "}
-            <b style={{ color: "#0f172a" }}>{page}</b> / <b style={{ color: "#0f172a" }}>{totalPages}</b>
+            Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona <b style={{ color: "#0f172a" }}>{page}</b>{" "}
+            / <b style={{ color: "#0f172a" }}>{totalPages}</b>
             <span style={{ marginLeft: 8, color: "#94a3b8" }}>
               (sort: {sortLabel(sortKey)}
               {difficulty !== "all" ? ` • ${difficultyLabel(difficulty)}` : ""})
             </span>
             {kidsTapeOnly ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• taśma dla dzieci</span> : null}
-            {minOpenKm > 0 ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• open_km &gt; {minOpenKm}</span> : null}
+            {minOpenKm > 0 ? (
+              <span style={{ marginLeft: 8, color: "#94a3b8" }}>• open_km &gt; {minOpenKm}</span>
+            ) : null}
           </div>
           {loading && <span style={{ color: "#475569", fontSize: 12 }}>Ładowanie…</span>}
           {error && <span style={{ color: "#dc2626", fontSize: 12 }}>Błąd: {error}</span>}
@@ -714,7 +720,11 @@ export default function Home() {
               background: "#ffffff",
             }}
           >
-            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading} style={btnStyle(page <= 1 || loading)}>
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1 || loading}
+              style={btnStyle(page <= 1 || loading)}
+            >
               ← Poprzednia
             </button>
 
@@ -725,7 +735,11 @@ export default function Home() {
               ) : null}
             </div>
 
-            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading} style={btnStyle(page >= totalPages || loading)}>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || loading}
+              style={btnStyle(page >= totalPages || loading)}
+            >
               Następna →
             </button>
           </div>
@@ -829,9 +843,13 @@ function Th({ children, style }: { children: any; style?: any }) {
   );
 }
 
-function Td({ children, style }: { children: any; style?: any }) {
+/** ✅ ZMIANA: Td przyjmuje normalne propsy <td>, więc można używać m.in. title= */
+type TdProps = React.TdHTMLAttributes<HTMLTableCellElement>;
+
+function Td({ children, style, ...props }: TdProps) {
   return (
     <td
+      {...props}
       style={{
         padding: "6px 8px",
         verticalAlign: "top",
