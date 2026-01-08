@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
 
@@ -714,11 +714,7 @@ export default function Home() {
               background: "#ffffff",
             }}
           >
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1 || loading}
-              style={btnStyle(page <= 1 || loading)}
-            >
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading} style={btnStyle(page <= 1 || loading)}>
               ← Poprzednia
             </button>
 
@@ -729,11 +725,7 @@ export default function Home() {
               ) : null}
             </div>
 
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages || loading}
-              style={btnStyle(page >= totalPages || loading)}
-            >
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading} style={btnStyle(page >= totalPages || loading)}>
               Następna →
             </button>
           </div>
@@ -817,12 +809,9 @@ function Tile({ title, value }: { title: string; value: number }) {
   );
 }
 
-/* ✅ pozwala używać title, colSpan, className itd. */
-type ThProps = React.ThHTMLAttributes<HTMLTableCellElement> & { children: React.ReactNode };
-function Th({ children, style, ...props }: ThProps) {
+function Th({ children, style }: { children: any; style?: any }) {
   return (
     <th
-      {...props}
       style={{
         textAlign: "left",
         padding: "6px 8px",
@@ -832,7 +821,7 @@ function Th({ children, style, ...props }: ThProps) {
         whiteSpace: "nowrap",
         overflow: "hidden",
         textOverflow: "ellipsis",
-        ...(style as React.CSSProperties),
+        ...style,
       }}
     >
       {children}
@@ -840,12 +829,9 @@ function Th({ children, style, ...props }: ThProps) {
   );
 }
 
-/* ✅ pozwala używać title, colSpan, onClick itd. */
-type TdProps = React.TdHTMLAttributes<HTMLTableCellElement> & { children: React.ReactNode };
-function Td({ children, style, ...props }: TdProps) {
+function Td({ children, style }: { children: any; style?: any }) {
   return (
     <td
-      {...props}
       style={{
         padding: "6px 8px",
         verticalAlign: "top",
@@ -854,7 +840,7 @@ function Td({ children, style, ...props }: TdProps) {
         whiteSpace: "nowrap",
         overflow: "hidden",
         textOverflow: "ellipsis",
-        ...(style as React.CSSProperties),
+        ...style,
       }}
     >
       {children}
