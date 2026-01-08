@@ -465,6 +465,12 @@ export default function ResortPage() {
       .in("skipass_product_id", ids)
       .not("price", "is", null);
 
+    // ✅ POPRAWKA: obsłuż błąd pobierania cen
+    if (pricesRes.error) {
+      setSkipassRows([]);
+      return;
+    }
+
     const allPricesRaw = (pricesRes.data ?? []) as any as SkipassPrice[];
 
     // ✅ FILTR: tylko ceny ważne "dzisiaj"
@@ -1423,24 +1429,46 @@ function DashCard({
   );
 }
 
-function Th({ children, style }: { children: any; style?: React.CSSProperties }) {
+/* ✅ POPRAWKA: Th/Td przepuszczają standardowe propsy HTML (np. title, colSpan, onClick, itd.) */
+
+type ThProps = React.ThHTMLAttributes<HTMLTableCellElement> & {
+  children: React.ReactNode;
+};
+
+function Th({ children, style, ...props }: ThProps) {
   return (
-    <th style={{ textAlign: "left", padding: "10px 10px", fontSize: 12, color: "#64748b", fontWeight: 700, ...(style ?? {}) }}>
+    <th
+      {...props}
+      style={{
+        textAlign: "left",
+        padding: "10px 10px",
+        fontSize: 12,
+        color: "#64748b",
+        fontWeight: 700,
+        ...(style as React.CSSProperties),
+      }}
+    >
       {children}
     </th>
   );
 }
 
-function Td({ children, strong, style }: { children: any; strong?: boolean; style?: React.CSSProperties }) {
+type TdProps = React.TdHTMLAttributes<HTMLTableCellElement> & {
+  children: React.ReactNode;
+  strong?: boolean;
+};
+
+function Td({ children, strong, style, ...props }: TdProps) {
   return (
     <td
+      {...props}
       style={{
         padding: "10px 10px",
         verticalAlign: "middle",
         fontSize: 13,
         color: "inherit",
         fontWeight: strong ? 800 : 500,
-        ...(style ?? {}),
+        ...(style as React.CSSProperties),
       }}
     >
       {children}
