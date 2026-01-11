@@ -659,9 +659,18 @@ export default function ResortPage() {
   const headerSubline = `${resort?.city ?? "—"}${resort?.region ? ` • ${resort.region}` : ""}`;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#ffffff", fontFamily: "system-ui, Arial" }}>
+    <div
+      className="rt-root"
+      style={{
+        minHeight: "100vh",
+        background: "#ffffff",
+        fontFamily: "system-ui, Arial",
+        overflowX: "hidden", // ✅ FIX: blokada poziomego scrolla na mobile
+      }}
+    >
       {/* ✅ responsywne layouty (bez Tailwinda) */}
       <style>{`
+        .rt-root, .rt-root * { box-sizing: border-box; } /* ✅ FIX */
         .rt-top { display:flex; justify-content:space-between; gap:16px; align-items:flex-end; }
         .rt-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
         .rt-grid2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
@@ -849,7 +858,8 @@ export default function ResortPage() {
                         </Marker>
                       </div>
 
-                      <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                      {/* ✅ FIX: minWidth:0 pomaga flexowi ściskać dzieci */}
+                      <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
                         <Chip label={`Trudność: ${difficultyLabel(nd)}`} dot={d.dot} />
                         <Chip label={`Długość: ${s.length_m ? `${s.length_m} m` : "—"}`} />
                         <Chip label={`Sektor: ${s.sector ?? "—"}`} />
@@ -1028,7 +1038,8 @@ export default function ResortPage() {
                           </Marker>
                         </div>
 
-                        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {/* ✅ FIX: minWidth:0 pomaga flexowi ściskać dzieci */}
+                        <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
                           <Chip label={`Typ: ${l.type ?? "—"}`} />
                           <Chip label={`Miejsca: ${l.seats ?? "—"}`} />
                           <Chip label={`PPH: ${l.capacity_pph ? `${l.capacity_pph}/h` : "—"}`} />
@@ -1191,7 +1202,12 @@ export default function ResortPage() {
 
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                             {row.product.url ? (
-                              <a href={row.product.url} target="_blank" rel="noreferrer" style={{ ...btnGhost(), textDecoration: "none" }}>
+                              <a
+                                href={row.product.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ ...btnGhost(), textDecoration: "none" }}
+                              >
                                 Cennik
                               </a>
                             ) : null}
@@ -1238,10 +1254,15 @@ export default function ResortPage() {
                           return (
                             <tr key={`${row.product.id}-${i}`} style={{ borderTop: "1px solid #f1f5f9", background: "#ffffff" }}>
                               <Td strong>
-                                <div style={{ maxWidth: 360, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={name}>
+                                <div
+                                  style={{ maxWidth: 360, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                                  title={name}
+                                >
                                   {name}
                                 </div>
-                                {row.product.provider ? <div style={{ marginTop: 2, fontSize: 11, color: "#94a3b8" }}>{row.product.provider}</div> : null}
+                                {row.product.provider ? (
+                                  <div style={{ marginTop: 2, fontSize: 11, color: "#94a3b8" }}>{row.product.provider}</div>
+                                ) : null}
                               </Td>
 
                               <Td>{season}</Td>
@@ -1291,7 +1312,10 @@ export default function ResortPage() {
                               </Td>
 
                               <Td>
-                                <div style={{ maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={label ?? ""}>
+                                <div
+                                  style={{ maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                                  title={label ?? ""}
+                                >
                                   {label ?? "—"}
                                 </div>
                               </Td>
@@ -1694,6 +1718,8 @@ function DifficultyStats({
   );
 }
 
+/* ===================== CHIP (FIX overflow) ===================== */
+
 function Chip({ label, dot }: { label: string; dot?: string }) {
   return (
     <span
@@ -1708,11 +1734,21 @@ function Chip({ label, dot }: { label: string; dot?: string }) {
         color: "#0f172a",
         fontSize: 12,
         fontWeight: 800,
+
+        // ✅ FIX: chip nie może rozpychać layoutu na mobile
+        maxWidth: "100%",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
         whiteSpace: "nowrap",
+        flex: "0 1 auto",
       }}
+      title={label}
     >
-      {dot ? <span style={{ width: 9, height: 9, borderRadius: 99, background: dot, display: "inline-block" }} /> : null}
-      {label}
+      {dot ? (
+        <span style={{ width: 9, height: 9, borderRadius: 99, background: dot, display: "inline-block", flex: "0 0 auto" }} />
+      ) : null}
+
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
     </span>
   );
 }
