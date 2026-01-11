@@ -656,20 +656,20 @@ export default function ResortPage() {
   const hasMap = Boolean(resort?.trail_map_url);
   const hasWebcam = Boolean(resort?.webcam_url && resort.webcam_url.trim().length > 0);
 
+  const headerSubline = `${resort?.city ?? "—"}${resort?.region ? ` • ${resort.region}` : ""}`;
+
   return (
     <div style={{ minHeight: "100vh", background: "#ffffff", fontFamily: "system-ui, Arial" }}>
-      {/* ✅ CSS “responsywny” (bez Tailwinda) */}
+      {/* ✅ responsywne layouty (bez Tailwinda) */}
       <style>{`
         .rt-top { display:flex; justify-content:space-between; gap:16px; align-items:flex-end; }
         .rt-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
         .rt-grid2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
-        .rt-banner-img { height:200px; }
 
         @media (max-width: 860px) {
           .rt-top { flex-direction:column; align-items:flex-start; }
           .rt-actions { justify-content:flex-start; }
           .rt-grid2 { grid-template-columns: 1fr; }
-          .rt-banner-img { height:140px; }
         }
       `}</style>
 
@@ -684,11 +684,33 @@ export default function ResortPage() {
 
         <div className="rt-top" style={{ marginTop: 10 }}>
           <div style={{ minWidth: 0 }}>
-            <h1 style={{ fontSize: 26, fontWeight: 800, margin: "12px 0 0", letterSpacing: -0.2 }}>
+            {/* ✅ ujednolicony styl nagłówka (jak na głównej) */}
+            <h1
+              style={{
+                fontSize: 26,
+                fontWeight: 900,
+                margin: "10px 0 0",
+                letterSpacing: -0.2,
+                color: "#0f172a",
+                lineHeight: 1.15,
+              }}
+            >
               {resort?.name ?? "—"}
             </h1>
-            <div style={{ marginTop: 6, color: "#94a3b8", fontSize: 12 }}>
-              {resort?.city ?? "—"} {resort?.region ? `• ${resort.region}` : ""}
+
+            <div
+              style={{
+                marginTop: 2,
+                color: "#94a3b8",
+                fontSize: 12,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                maxWidth: "100%",
+              }}
+              title={headerSubline}
+            >
+              {headerSubline}
             </div>
           </div>
 
@@ -792,11 +814,36 @@ export default function ResortPage() {
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
                         <div style={{ fontWeight: 900, color: "#0f172a", minWidth: 0 }}>
-                          <span style={{ color: "#94a3b8", fontWeight: 900 }}>{s.number ?? "—"}</span>{" "}
-                          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "72vw" }}>
-                            {s.name ?? "—"}
-                          </span>
+                          {/* ✅ FIX: stała kolumna numeru + elipsa nazwy */}
+                          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                            <span
+                              style={{
+                                minWidth: 28,
+                                textAlign: "right",
+                                color: "#94a3b8",
+                                fontWeight: 900,
+                                flex: "0 0 auto",
+                              }}
+                            >
+                              {s.number ?? "—"}
+                            </span>
+
+                            <span
+                              style={{
+                                minWidth: 0,
+                                flex: "1 1 auto",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                display: "block",
+                              }}
+                              title={s.name ?? "—"}
+                            >
+                              {s.name ?? "—"}
+                            </span>
+                          </div>
                         </div>
+
                         <Marker dot={st.dot} fg={st.fg}>
                           {statusLabel(ns)}
                         </Marker>
@@ -935,14 +982,47 @@ export default function ResortPage() {
                     const st = statusAccent(ns);
 
                     return (
-                      <div key={(l.id as any) ?? i} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
+                      <div
+                        key={(l.id as any) ?? i}
+                        style={{
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 14,
+                          padding: 12,
+                          background: "#fff",
+                        }}
+                      >
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
                           <div style={{ fontWeight: 900, color: "#0f172a", minWidth: 0 }}>
-                            <span style={{ color: "#94a3b8", fontWeight: 900 }}>{l.number ?? "—"}</span>{" "}
-                            <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "inline-block", maxWidth: "72vw" }}>
-                              {l.name ?? "—"}
-                            </span>
+                            {/* ✅ FIX: stała kolumna numeru + elipsa nazwy */}
+                            <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+                              <span
+                                style={{
+                                  minWidth: 28,
+                                  textAlign: "right",
+                                  color: "#94a3b8",
+                                  fontWeight: 900,
+                                  flex: "0 0 auto",
+                                }}
+                              >
+                                {l.number ?? "—"}
+                              </span>
+
+                              <span
+                                style={{
+                                  minWidth: 0,
+                                  flex: "1 1 auto",
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  display: "block",
+                                }}
+                                title={l.name ?? "—"}
+                              >
+                                {l.name ?? "—"}
+                              </span>
+                            </div>
                           </div>
+
                           <Marker dot={st.dot} fg={st.fg}>
                             {statusLabel(ns)}
                           </Marker>
@@ -1056,9 +1136,14 @@ export default function ResortPage() {
                     const label = row.label;
 
                     return (
-                      <div key={`${row.product.id}-${i}`} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
+                      <div
+                        key={`${row.product.id}-${i}`}
+                        style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}
+                      >
                         <div style={{ fontWeight: 900, color: "#0f172a" }}>{name}</div>
-                        {row.product.provider ? <div style={{ marginTop: 2, fontSize: 12, color: "#94a3b8" }}>{row.product.provider}</div> : null}
+                        {row.product.provider ? (
+                          <div style={{ marginTop: 2, fontSize: 12, color: "#94a3b8" }}>{row.product.provider}</div>
+                        ) : null}
 
                         <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
@@ -1074,7 +1159,12 @@ export default function ResortPage() {
                                   href={row.url}
                                   target="_blank"
                                   rel="noreferrer"
-                                  style={{ color: "#0f172a", fontWeight: 900, textDecoration: "underline", textUnderlineOffset: 3 }}
+                                  style={{
+                                    color: "#0f172a",
+                                    fontWeight: 900,
+                                    textDecoration: "underline",
+                                    textUnderlineOffset: 3,
+                                  }}
                                 >
                                   {fmtMoney(Number(row.price), cur)}
                                 </a>
@@ -1086,7 +1176,16 @@ export default function ResortPage() {
                             )}
                           </div>
 
-                          <div style={{ color: "#94a3b8", fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={label ?? ""}>
+                          <div
+                            style={{
+                              color: "#94a3b8",
+                              fontSize: 12,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                            title={label ?? ""}
+                          >
                             {label ?? "—"}
                           </div>
 
@@ -1355,14 +1454,16 @@ function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string 
         background: "#fafcff",
       }}
     >
+      {/* ✅ identycznie jak na stronie głównej */}
       <img
         src="/baner.png"
         alt="otwartestoki banner"
-        className="rt-banner-img"
         style={{
           display: "block",
           width: "100%",
+          height: "clamp(120px, 20vw, 220px)",
           objectFit: "cover",
+          objectPosition: "center",
           background: "#fafcff",
         }}
       />
