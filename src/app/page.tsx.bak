@@ -205,9 +205,6 @@ export default function Home() {
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // ✅ afiliacja: domyślnie zwinięta
-  const [affOpen, setAffOpen] = useState(false);
-
   async function loadGlobalStatsUpdatedAt() {
     const { data, error } = await supabase
       .from("resorts_public_list")
@@ -454,7 +451,9 @@ export default function Home() {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Kolor / trudność</label>
+            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+              Kolor / trudność
+            </label>
             <select
               value={difficulty}
               onChange={(e) => setDifficulty(e.target.value as any)}
@@ -479,7 +478,9 @@ export default function Home() {
                 <b style={{ color: "#64748b" }}>{difficultyLabel(difficulty)}</b>
               </div>
             ) : (
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Trasy + otwarte km liczone dla wszystkich tras.</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                Trasy + otwarte km liczone dla wszystkich tras.
+              </div>
             )}
 
             {/* ✅ sortowanie (bez resetu trudności) */}
@@ -515,14 +516,16 @@ export default function Home() {
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
           <div style={{ color: "#64748b", fontSize: 12 }}>
-            Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona{" "}
-            <b style={{ color: "#0f172a" }}>{page}</b> / <b style={{ color: "#0f172a" }}>{totalPages}</b>
+            Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona <b style={{ color: "#0f172a" }}>{page}</b>{" "}
+            / <b style={{ color: "#0f172a" }}>{totalPages}</b>
             <span style={{ marginLeft: 8, color: "#94a3b8" }}>
               (sort: {sortLabel(sortKey)}
               {difficulty !== "all" ? ` • ${difficultyLabel(difficulty)}` : ""})
             </span>
             {kidsTapeOnly ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• taśma dla dzieci</span> : null}
-            {minOpenKm > 0 ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• open_km &gt; {minOpenKm}</span> : null}
+            {minOpenKm > 0 ? (
+              <span style={{ marginLeft: 8, color: "#94a3b8" }}>• open_km &gt; {minOpenKm}</span>
+            ) : null}
           </div>
           {loading && <span style={{ color: "#475569", fontSize: 12 }}>Ładowanie…</span>}
           {error && <span style={{ color: "#dc2626", fontSize: 12 }}>Błąd: {error}</span>}
@@ -726,12 +729,9 @@ export default function Home() {
             </button>
 
             <div style={{ color: "#64748b", fontSize: 12 }}>
-              {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z{" "}
-              {totalCount}
+              {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z {totalCount}
               {minOpenKm > 0 ? (
-                <span style={{ marginLeft: 8, color: "#94a3b8" }}>
-                  • po filtrze open_km: {filteredRows.length} na tej stronie
-                </span>
+                <span style={{ marginLeft: 8, color: "#94a3b8" }}>• po filtrze open_km: {filteredRows.length} na tej stronie</span>
               ) : null}
             </div>
 
@@ -745,18 +745,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ===================== AFFILIATION (COLLAPSIBLE, DEFAULT CLOSED) ===================== */}
-        <div style={{ marginTop: 18 }}>
-          <CollapsibleCard
-            title="Afiliacja / współpraca dla ośrodków"
-            subtitle="Sekcja dla resortów: skipassy, oficjalne oferty, kampanie sezonowe"
-            open={affOpen}
-            onToggle={() => setAffOpen((v) => !v)}
-          >
-            <AffiliateResortsSection />
-          </CollapsibleCard>
-        </div>
-
         <div
           style={{
             marginTop: 18,
@@ -767,9 +755,9 @@ export default function Home() {
             lineHeight: 1.5,
           }}
         >
-          Dane prezentowane na stronie pochodzą bezpośrednio od ośrodków narciarskich, z kamer online oraz z wizji
-          lokalnych. Informacje są aktualizowane codziennie i mogą różnić się od stanu faktycznego w danym momencie. W
-          razie znalezienia błędów lub braków resortów proszę o kontakt :{" "}
+          Dane prezentowane na stronie pochodzą bezpośrednio od ośrodków narciarskich, z kamer online oraz z wizji lokalnych.
+          Informacje są aktualizowane codziennie i mogą różnić się od stanu faktycznego w danym momencie. W razie znalezienia błędów
+          lub braków resortów proszę o kontakt :{" "}
           <a href="mailto:kontakt@otwartestoki.pl" style={{ color: "#2563eb", fontWeight: 800, textDecoration: "none" }}>
             kontakt@otwartestoki.pl
           </a>
@@ -824,183 +812,6 @@ function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string 
   );
 }
 
-/* ===================== COLLAPSIBLE CARD ===================== */
-
-function CollapsibleCard({
-  title,
-  subtitle,
-  open,
-  onToggle,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  open: boolean;
-  onToggle: () => void;
-  children: any;
-}) {
-  return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, overflow: "hidden", background: "#ffffff" }}>
-      <button
-        onClick={onToggle}
-        aria-expanded={open}
-        style={{
-          width: "100%",
-          textAlign: "left",
-          border: "none",
-          background: "#ffffff",
-          padding: "12px 12px",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>{title}</div>
-          {subtitle ? (
-            <div
-              style={{
-                fontSize: 12,
-                color: "#94a3b8",
-                marginTop: 2,
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {subtitle}
-            </div>
-          ) : null}
-        </div>
-
-        <div
-          style={{
-            minWidth: 34,
-            height: 34,
-            borderRadius: 12,
-            border: "1px solid #e2e8f0",
-            background: "#f8fafc",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 900,
-            color: "#0f172a",
-          }}
-          title={open ? "Zwiń" : "Rozwiń"}
-        >
-          {open ? "▾" : "▸"}
-        </div>
-      </button>
-
-      {open ? <div style={{ borderTop: "1px solid #e2e8f0", padding: 12 }}>{children}</div> : null}
-    </div>
-  );
-}
-
-/* ===================== AFFILIATE SECTION (RESORTS) ===================== */
-
-function AffiliateResortsSection() {
-  return (
-    <div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 12,
-            border: "1px solid #e2e8f0",
-            background: "#f8fafc",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 16,
-          }}
-        >
-          🤝
-        </div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>Współpraca bezpośrednio z resortami</div>
-          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-            Możemy dodać oficjalne linki i wyróżnienia resortów w ramach transparentnej afiliacji.
-          </div>
-        </div>
-      </div>
-
-      <div
-        style={{
-          marginTop: 10,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: 10,
-        }}
-      >
-        <MiniBox
-          title="Skipassy / bilety"
-          icon="🎟️"
-          bullets={[
-            "Link afiliacyjny do cennika lub zakupu",
-            "Widoczność na stronie głównej i stronie resortu",
-            "UTM + raport kliknięć",
-          ]}
-        />
-        <MiniBox
-          title="Wyróżnienie resortu"
-          icon="⭐"
-          bullets={["Etykieta „Partner”", "Preferowane pozycjonowanie w regionie", "Dodatkowy opis + CTA"]}
-        />
-        <MiniBox
-          icon="📣"
-          title="Kampanie sezonowe"
-          bullets={["Ferie / weekend / nocna jazda", "Baner w obrębie listy", "Rozliczenie CPC/CPA (do ustalenia)"]}
-        />
-      </div>
-
-      <div style={{ marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
-        Kontakt w sprawie współpracy:{" "}
-        <a href="mailto:wspolpraca@otwartestoki.pl" style={{ color: "#2563eb", fontWeight: 800, textDecoration: "none" }}>
-          wspolpraca@otwartestoki.pl
-        </a>
-      </div>
-    </div>
-  );
-}
-
-function MiniBox({ title, icon, bullets }: { title: string; icon: string; bullets: string[] }) {
-  return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, background: "#fff", padding: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div
-          style={{
-            width: 34,
-            height: 34,
-            borderRadius: 12,
-            border: "1px solid #e2e8f0",
-            background: "#f8fafc",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 16,
-          }}
-        >
-          {icon}
-        </div>
-        <div>
-          <div style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>{title}</div>
-          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>Miejsce na ofertę</div>
-        </div>
-      </div>
-
-      <ul style={{ marginTop: 10, marginBottom: 0, paddingLeft: 18, color: "#64748b", fontSize: 12, lineHeight: 1.6 }}>
-        {bullets.map((b, i) => (
-          <li key={i}>{b}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 /* ===================== UI ===================== */
 
 function Tile({ title, value }: { title: string; value: number }) {
@@ -1032,9 +843,13 @@ function Th({ children, style }: { children: any; style?: any }) {
   );
 }
 
-function Td({ children, style }: { children: any; style?: any }) {
+/** ✅ ZMIANA: Td przyjmuje normalne propsy <td>, więc można używać m.in. title= */
+type TdProps = React.TdHTMLAttributes<HTMLTableCellElement>;
+
+function Td({ children, style, ...props }: TdProps) {
   return (
     <td
+      {...props}
       style={{
         padding: "6px 8px",
         verticalAlign: "top",

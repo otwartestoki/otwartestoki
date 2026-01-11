@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 /* ===================== TYPES ===================== */
 
@@ -61,7 +62,9 @@ const PAGE_SIZE = 15;
 function normalizeResortStatus(s?: string | null) {
   const v = (s ?? "").toLowerCase().trim();
   if (["open", "otwarty", "otwarta", "otwarte", "opened"].includes(v)) return "open";
-  if (["closed", "zamkniety", "zamknięty", "zamknieta", "zamknięta", "zamkniete", "zamknięte"].includes(v))
+  if (
+    ["closed", "zamkniety", "zamknięty", "zamknieta", "zamknięta", "zamkniete", "zamknięte"].includes(v)
+  )
     return "closed";
   return "closed";
 }
@@ -179,6 +182,11 @@ function resortSlug(r: { name?: string | null; city?: string | null; region?: st
 /* ===================== COMPONENT ===================== */
 
 export default function Home() {
+  const params = useSearchParams();
+  const forcedView = (params.get("view") ?? "").toLowerCase(); // "cards" | "table" | ""
+  const forceCards = forcedView === "cards";
+  const forceTable = forcedView === "table";
+
   const [rows, setRows] = useState<ResortRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,7 +204,6 @@ export default function Home() {
   const [kidsTapeOnly, setKidsTapeOnly] = useState(false);
 
   // ✅ NOWY filtr: minimalna liczba otwartych km (po stronie klienta)
-  // domyślnie 0 = brak filtrowania
   const [minOpenKm, setMinOpenKm] = useState<number>(0);
 
   // ✅ sortowanie (SQL)
@@ -204,6 +211,53 @@ export default function Home() {
 
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+
+  // ===== Mobile bottom sheet (draft state) =====
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const [dStatus, setDStatus] = useState<"all" | "open" | "closed">("all");
+  const [dDifficulty, setDDifficulty] = useState<DifficultyFilter>("all");
+  const [dKidsTapeOnly, setDKidsTapeOnly] = useState(false);
+  const [dMinOpenKm, setDMinOpenKm] = useState<number>(0);
+  const [dSortKey, setDSortKey] = useState<SortKey>("open_km_desc");
+
+  function openFilters() {
+    // sync draft from current
+    setDStatus(status);
+    setDDifficulty(difficulty);
+    setDKidsTapeOnly(kidsTapeOnly);
+    setDMinOpenKm(minOpenKm);
+    setDSortKey(sortKey);
+    setFiltersOpen(true);
+  }
+
+  function applyFilters() {
+    setStatus(dStatus);
+    setDifficulty(dDifficulty);
+    setKidsTapeOnly(dKidsTapeOnly);
+    setMinOpenKm(dMinOpenKm);
+    setSortKey(dSortKey);
+    setFiltersOpen(false);
+  }
+
+  function resetDraft() {
+    setDStatus("all");
+    setDDifficulty("all");
+    setDKidsTapeOnly(false);
+    setDMinOpenKm(0);
+    setDSortKey("open_km_desc");
+  }
+
+  const activeFiltersCount = useMemo(() => {
+    let c = 0;
+    if (q.trim().length) c += 1;
+    if (status !== "all") c += 1;
+    if (difficulty !== "all") c += 1;
+    if (kidsTapeOnly) c += 1;
+    if (minOpenKm > 0) c += 1;
+    // sort nie liczę jako filtr (to preferencja)
+    return c;
+  }, [q, status, difficulty, kidsTapeOnly, minOpenKm]);
 
   async function loadGlobalStatsUpdatedAt() {
     const { data, error } = await supabase
@@ -254,10 +308,7 @@ export default function Home() {
       p_status: status,
       p_difficulty: difficulty,
       p_kids_tape: kidsTapeOnly ? true : null,
-
-      // ✅ sortowanie po stronie SQL
       p_sort: sortKey,
-
       p_limit: PAGE_SIZE,
       p_offset: offset,
     });
@@ -289,13 +340,11 @@ export default function Home() {
     loadGlobalStatsUpdatedAt();
   }, []);
 
-  // ✅ gdy zmienia się filtr globalny (q/difficulty/kidsTapeOnly) – odśwież kafelki
   useEffect(() => {
     loadTiles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, difficulty, kidsTapeOnly]);
 
-  // ✅ klient-side filtr po open_km (RPC jeszcze nie wspiera tego parametru)
   const filteredRows = useMemo(() => {
     const thr = Number.isFinite(minOpenKm) ? minOpenKm : 0;
     if (!thr || thr <= 0) return rows;
@@ -311,434 +360,634 @@ export default function Home() {
         <ContentBanner globalStatsUpdatedAt={globalStatsUpdatedAt} />
       </div>
 
-      {/* PAGE CONTENT */}
       <main style={{ padding: 20, maxWidth: 1100, margin: "0 auto" }}>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-            gap: 10,
-            marginTop: 14,
-            marginBottom: 14,
-          }}
-        >
+        <div className="tilesGrid">
           <Tile title="Otwarte" value={tiles.open} />
           <Tile title="Zamknięte" value={tiles.closed} />
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "2fr 1fr 1fr",
-            gap: 10,
-            padding: 12,
-            border: "1px solid #e2e8f0",
-            borderRadius: 14,
-            marginBottom: 12,
-            background: "#ffffff",
-          }}
-        >
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Szukaj</label>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="np. Białka, Szczyrk, Małopolska…"
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                border: "1px solid #e2e8f0",
-                borderRadius: 12,
-                outline: "none",
-                background: "#fbfdff",
-              }}
-            />
-            <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Szuka po: nazwie, mieście i regionie.</div>
-
-            <label
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginTop: 10,
-                fontSize: 12,
-                color: "#64748b",
-                userSelect: "none",
-              }}
-            >
+        {/* ===================== DESKTOP FILTERS (as before) ===================== */}
+        <div className={forceCards ? "hide" : "desktopOnly"}>
+          <div className="filtersGrid">
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Szukaj</label>
               <input
-                type="checkbox"
-                checked={kidsTapeOnly}
-                onChange={(e) => setKidsTapeOnly(e.target.checked)}
-                style={{ width: 16, height: 16 }}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="np. Białka, Szczyrk, Małopolska…"
+                style={inputStyle}
               />
-              Tylko z otwartą taśmą dla dzieci
-            </label>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Szuka po: nazwie, mieście i regionie.</div>
 
-            {/* ✅ min open_km */}
-            <div style={{ marginTop: 10 }}>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
-                Min. otwarte km (więcej niż)
+              <label style={checkboxRowStyle}>
+                <input
+                  type="checkbox"
+                  checked={kidsTapeOnly}
+                  onChange={(e) => setKidsTapeOnly(e.target.checked)}
+                  style={{ width: 16, height: 16 }}
+                />
+                Tylko z otwartą taśmą dla dzieci
               </label>
 
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  step={0.5}
-                  value={Number.isFinite(minOpenKm) ? minOpenKm : 0}
-                  onChange={(e) => {
-                    const v = Number(String(e.target.value).replace(",", "."));
-                    setMinOpenKm(Number.isFinite(v) ? Math.max(0, v) : 0);
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 12,
-                    outline: "none",
-                    background: "#fbfdff",
-                  }}
-                  placeholder="np. 10"
-                />
+              <div style={{ marginTop: 10 }}>
+                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+                  Min. otwarte km (więcej niż)
+                </label>
 
-                <button
-                  type="button"
-                  onClick={() => setMinOpenKm(0)}
-                  disabled={minOpenKm <= 0}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    border: "1px solid #e2e8f0",
-                    background: minOpenKm <= 0 ? "#f8fafc" : "#ffffff",
-                    color: minOpenKm <= 0 ? "#94a3b8" : "#0f172a",
-                    cursor: minOpenKm <= 0 ? "not-allowed" : "pointer",
-                    fontWeight: 800,
-                    fontSize: 12,
-                    whiteSpace: "nowrap",
-                  }}
-                  title="Wyczyść filtr otwartych km"
-                >
-                  Reset
-                </button>
-              </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step={0.5}
+                    value={Number.isFinite(minOpenKm) ? minOpenKm : 0}
+                    onChange={(e) => {
+                      const v = Number(String(e.target.value).replace(",", "."));
+                      setMinOpenKm(Number.isFinite(v) ? Math.max(0, v) : 0);
+                    }}
+                    style={inputStyle}
+                    placeholder="np. 10"
+                  />
 
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                Filtr działa lokalnie (na wynikach z bieżącej strony) i pokazuje resorty, które mają{" "}
-                <b style={{ color: "#64748b" }}>więcej</b> niż podana liczba km.
+                  <button
+                    type="button"
+                    onClick={() => setMinOpenKm(0)}
+                    disabled={minOpenKm <= 0}
+                    style={btnStyle(minOpenKm <= 0)}
+                    title="Wyczyść filtr otwartych km"
+                  >
+                    Reset
+                  </button>
+                </div>
+
+                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                  Filtr działa lokalnie (na wynikach z bieżącej strony) i pokazuje resorty, które mają{" "}
+                  <b style={{ color: "#64748b" }}>więcej</b> niż podana liczba km.
+                </div>
               </div>
             </div>
-          </div>
 
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Status</label>
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as any)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                border: "1px solid #e2e8f0",
-                borderRadius: 12,
-                background: "#fbfdff",
-              }}
-            >
-              <option value="all">Wszystkie</option>
-              <option value="open">Otwarte</option>
-              <option value="closed">Zamknięte</option>
-            </select>
-          </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Status</label>
+              <select value={status} onChange={(e) => setStatus(e.target.value as any)} style={selectStyle}>
+                <option value="all">Wszystkie</option>
+                <option value="open">Otwarte</option>
+                <option value="closed">Zamknięte</option>
+              </select>
+            </div>
 
-          <div>
-            <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
-              Kolor / trudność
-            </label>
-            <select
-              value={difficulty}
-              onChange={(e) => setDifficulty(e.target.value as any)}
-              style={{
-                width: "100%",
-                padding: "10px 12px",
-                border: "1px solid #e2e8f0",
-                borderRadius: 12,
-                background: "#fbfdff",
-              }}
-            >
-              <option value="all">Wszystkie</option>
-              <option value="green">Zielone / łatwe</option>
-              <option value="blue">Niebieskie / średnie</option>
-              <option value="red">Czerwone / trudne</option>
-              <option value="black">Czarne / bardzo trudne</option>
-            </select>
-
-            {difficulty !== "all" ? (
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                Trasy + otwarte km liczone tylko dla:{" "}
-                <b style={{ color: "#64748b" }}>{difficultyLabel(difficulty)}</b>
-              </div>
-            ) : (
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                Trasy + otwarte km liczone dla wszystkich tras.
-              </div>
-            )}
-
-            {/* ✅ sortowanie (bez resetu trudności) */}
-            <div style={{ marginTop: 10 }}>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Sortowanie</label>
-              <select
-                value={sortKey}
-                onChange={(e) => {
-                  setSortKey(e.target.value as SortKey);
-                  // ❌ NIE resetujemy difficulty
-                }}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  border: "1px solid #e2e8f0",
-                  borderRadius: 12,
-                  background: "#fbfdff",
-                }}
-              >
-                <option value="open_km_desc">Otwarte km ↓</option>
-                <option value="comfort_desc">Komfort (PPH / km) ↓</option>
-                <option value="pph_desc">Przepustowość (PPH) ↓</option>
-                <option value="updated_desc">Najnowsza aktualizacja ↓</option>
-                <option value="price_asc">Cena skipassa ↑</option>
+            <div>
+              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
+                Kolor / trudność
+              </label>
+              <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as any)} style={selectStyle}>
+                <option value="all">Wszystkie</option>
+                <option value="green">Zielone / łatwe</option>
+                <option value="blue">Niebieskie / średnie</option>
+                <option value="red">Czerwone / trudne</option>
+                <option value="black">Czarne / bardzo trudne</option>
               </select>
 
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                Komfort = przepustowość otwarta / otwarte km (wyżej = zwykle mniej tłoczno).
+              {difficulty !== "all" ? (
+                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                  Trasy + otwarte km liczone tylko dla:{" "}
+                  <b style={{ color: "#64748b" }}>{difficultyLabel(difficulty)}</b>
+                </div>
+              ) : (
+                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                  Trasy + otwarte km liczone dla wszystkich tras.
+                </div>
+              )}
+
+              <div style={{ marginTop: 10 }}>
+                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Sortowanie</label>
+                <select
+                  value={sortKey}
+                  onChange={(e) => setSortKey(e.target.value as SortKey)}
+                  style={selectStyle}
+                >
+                  <option value="open_km_desc">Otwarte km ↓</option>
+                  <option value="comfort_desc">Komfort (PPH / km) ↓</option>
+                  <option value="pph_desc">Przepustowość (PPH) ↓</option>
+                  <option value="updated_desc">Najnowsza aktualizacja ↓</option>
+                  <option value="price_asc">Cena skipassa ↑</option>
+                </select>
+
+                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                  Komfort = przepustowość otwarta / otwarte km (wyżej = zwykle mniej tłoczno).
+                </div>
+
+                <div style={{ marginTop: 10, fontSize: 11, color: "#94a3b8", lineHeight: 1.35 }}>
+                  Podgląd widoku:{" "}
+                  <a
+                    href="/?view=cards"
+                    style={{ color: "#0f172a", fontWeight: 800, textDecoration: "underline", textUnderlineOffset: 3 }}
+                  >
+                    ?view=cards
+                  </a>{" "}
+                  /{" "}
+                  <a
+                    href="/?view=table"
+                    style={{ color: "#0f172a", fontWeight: 800, textDecoration: "underline", textUnderlineOffset: 3 }}
+                  >
+                    ?view=table
+                  </a>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        {/* ===================== MOBILE TOP BAR + BOTTOM SHEET FILTERS ===================== */}
+        <div className={forceCards ? "forceShow" : "mobileOnly"}>
+          <div className="mobileTopBar">
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Szukaj…"
+                style={{
+                  ...inputStyle,
+                  height: 44,
+                  padding: "10px 12px",
+                }}
+              />
+              <button
+                type="button"
+                onClick={openFilters}
+                style={{
+                  height: 44,
+                  borderRadius: 12,
+                  border: "1px solid #e2e8f0",
+                  background: "#ffffff",
+                  color: "#0f172a",
+                  fontWeight: 900,
+                  padding: "0 12px",
+                  whiteSpace: "nowrap",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+                aria-label="Filtry"
+              >
+                Filtry
+                {activeFiltersCount > 0 ? (
+                  <span
+                    style={{
+                      minWidth: 22,
+                      height: 22,
+                      borderRadius: 999,
+                      background: "#0f172a",
+                      color: "#ffffff",
+                      fontSize: 12,
+                      fontWeight: 900,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      padding: "0 6px",
+                    }}
+                  >
+                    {activeFiltersCount}
+                  </span>
+                ) : null}
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10 }}>
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                style={{ ...selectStyle, height: 44 }}
+                aria-label="Sortowanie"
+              >
+                <option value="open_km_desc">Otwarte km ↓</option>
+                <option value="comfort_desc">Komfort ↓</option>
+                <option value="pph_desc">PPH ↓</option>
+                <option value="updated_desc">Aktualizacja ↓</option>
+                <option value="price_asc">Cena ↑</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => setKidsTapeOnly((v) => !v)}
+                style={{
+                  height: 44,
+                  borderRadius: 12,
+                  border: "1px solid #e2e8f0",
+                  background: kidsTapeOnly ? "#0f172a" : "#ffffff",
+                  color: kidsTapeOnly ? "#ffffff" : "#0f172a",
+                  fontWeight: 900,
+                  padding: "0 12px",
+                  whiteSpace: "nowrap",
+                }}
+                aria-pressed={kidsTapeOnly}
+              >
+                Taśma 👶
+              </button>
+            </div>
+          </div>
+
+          <BottomSheet
+            open={filtersOpen}
+            title="Filtry"
+            onClose={() => setFiltersOpen(false)}
+            footer={
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={resetDraft}
+                  style={{
+                    flex: 1,
+                    height: 46,
+                    borderRadius: 14,
+                    border: "1px solid #e2e8f0",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    fontWeight: 900,
+                  }}
+                >
+                  Wyczyść
+                </button>
+                <button
+                  type="button"
+                  onClick={applyFilters}
+                  style={{
+                    flex: 1,
+                    height: 46,
+                    borderRadius: 14,
+                    border: "1px solid #0f172a",
+                    background: "#0f172a",
+                    color: "#ffffff",
+                    fontWeight: 900,
+                  }}
+                >
+                  Zastosuj
+                </button>
+              </div>
+            }
+          >
+            <div style={{ display: "grid", gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Status</label>
+                <select value={dStatus} onChange={(e) => setDStatus(e.target.value as any)} style={selectStyle}>
+                  <option value="all">Wszystkie</option>
+                  <option value="open">Otwarte</option>
+                  <option value="closed">Zamknięte</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={labelStyle}>Kolor / trudność</label>
+                <select value={dDifficulty} onChange={(e) => setDDifficulty(e.target.value as any)} style={selectStyle}>
+                  <option value="all">Wszystkie</option>
+                  <option value="green">Zielone / łatwe</option>
+                  <option value="blue">Niebieskie / średnie</option>
+                  <option value="red">Czerwone / trudne</option>
+                  <option value="black">Czarne / bardzo trudne</option>
+                </select>
+                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                  {dDifficulty !== "all"
+                    ? `Trasy + km tylko dla: ${difficultyLabel(dDifficulty)}`
+                    : "Trasy + km dla wszystkich tras."}
+                </div>
+              </div>
+
+              <div>
+                <label style={labelStyle}>Min. otwarte km (więcej niż)</label>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step={0.5}
+                    value={Number.isFinite(dMinOpenKm) ? dMinOpenKm : 0}
+                    onChange={(e) => {
+                      const v = Number(String(e.target.value).replace(",", "."));
+                      setDMinOpenKm(Number.isFinite(v) ? Math.max(0, v) : 0);
+                    }}
+                    style={inputStyle}
+                    placeholder="np. 10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setDMinOpenKm(0)}
+                    disabled={dMinOpenKm <= 0}
+                    style={{
+                      height: 44,
+                      borderRadius: 12,
+                      border: "1px solid #e2e8f0",
+                      background: dMinOpenKm <= 0 ? "#f8fafc" : "#ffffff",
+                      color: dMinOpenKm <= 0 ? "#94a3b8" : "#0f172a",
+                      cursor: dMinOpenKm <= 0 ? "not-allowed" : "pointer",
+                      fontWeight: 900,
+                      padding: "0 12px",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              <label style={checkboxRowStyle}>
+                <input
+                  type="checkbox"
+                  checked={dKidsTapeOnly}
+                  onChange={(e) => setDKidsTapeOnly(e.target.checked)}
+                  style={{ width: 18, height: 18 }}
+                />
+                Tylko z otwartą taśmą dla dzieci
+              </label>
+
+              <div>
+                <label style={labelStyle}>Sortowanie</label>
+                <select value={dSortKey} onChange={(e) => setDSortKey(e.target.value as SortKey)} style={selectStyle}>
+                  <option value="open_km_desc">Otwarte km ↓</option>
+                  <option value="comfort_desc">Komfort (PPH / km) ↓</option>
+                  <option value="pph_desc">Przepustowość (PPH) ↓</option>
+                  <option value="updated_desc">Najnowsza aktualizacja ↓</option>
+                  <option value="price_asc">Cena skipassa ↑</option>
+                </select>
+              </div>
+            </div>
+          </BottomSheet>
+        </div>
+
+        {/* ===================== INFO ROW ===================== */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap", marginTop: 12 }}>
           <div style={{ color: "#64748b", fontSize: 12 }}>
-            Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona <b style={{ color: "#0f172a" }}>{page}</b>{" "}
-            / <b style={{ color: "#0f172a" }}>{totalPages}</b>
+            Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona{" "}
+            <b style={{ color: "#0f172a" }}>{page}</b> / <b style={{ color: "#0f172a" }}>{totalPages}</b>
             <span style={{ marginLeft: 8, color: "#94a3b8" }}>
               (sort: {sortLabel(sortKey)}
               {difficulty !== "all" ? ` • ${difficultyLabel(difficulty)}` : ""})
             </span>
             {kidsTapeOnly ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• taśma dla dzieci</span> : null}
-            {minOpenKm > 0 ? (
-              <span style={{ marginLeft: 8, color: "#94a3b8" }}>• open_km &gt; {minOpenKm}</span>
-            ) : null}
+            {minOpenKm > 0 ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• open_km &gt; {minOpenKm}</span> : null}
           </div>
           {loading && <span style={{ color: "#475569", fontSize: 12 }}>Ładowanie…</span>}
           {error && <span style={{ color: "#dc2626", fontSize: 12 }}>Błąd: {error}</span>}
         </div>
 
-        <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, overflow: "hidden", background: "#fff" }}>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
-              <thead style={{ background: "#fafcff" }}>
-                <tr>
-                  <Th style={{ width: 190 }}>Resort</Th>
-                  <Th style={{ width: 95 }}>Status</Th>
-                  <Th style={{ width: 85 }}>Trasy</Th>
-                  <Th style={{ width: 95 }}>Otwarte km</Th>
-                  <Th style={{ width: 120 }}>Skipass</Th>
-                  <Th style={{ width: 90 }}>Wyciągi</Th>
-                  <Th style={{ width: 130 }}>Przepustowość</Th>
-                  <Th style={{ width: 90 }}>Akt.</Th>
-                  <Th style={{ width: 60 }}>Link</Th>
-                </tr>
-              </thead>
+        {/* ===================== CARDS (mobile + force) ===================== */}
+        <div className={forceCards ? "forceShow" : forceTable ? "hide" : "mobileOnly"}>
+          <ResortCards rows={filteredRows} loading={loading} />
+        </div>
 
-              <tbody>
-                {filteredRows.length === 0 && !loading ? (
+        {/* ===================== TABLE (desktop + force) ===================== */}
+        <div className={forceTable ? "forceShowTable" : forceCards ? "hide" : "desktopOnly"}>
+          <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, overflow: "hidden", background: "#fff" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+                <thead style={{ background: "#fafcff" }}>
                   <tr>
-                    <td colSpan={9} style={{ padding: 14, color: "#64748b", fontSize: 13 }}>
-                      Brak wyników dla wybranych filtrów.
-                    </td>
+                    <Th style={{ width: 190 }}>Resort</Th>
+                    <Th style={{ width: 95 }}>Status</Th>
+                    <Th style={{ width: 85 }}>Trasy</Th>
+                    <Th style={{ width: 95 }}>Otwarte km</Th>
+                    <Th style={{ width: 120 }}>Skipass</Th>
+                    <Th style={{ width: 90 }}>Wyciągi</Th>
+                    <Th style={{ width: 130 }}>Przepustowość</Th>
+                    <Th style={{ width: 90 }}>Akt.</Th>
+                    <Th style={{ width: 60 }}>Link</Th>
                   </tr>
-                ) : (
-                  filteredRows.map((r, idx) => {
-                    const s = normalizeResortStatus(r.status_norm);
+                </thead>
 
-                    const openKm = n0(r.open_km);
-                    const slopesOpen = n0(r.slopes_open);
-                    const slopesTotal = n0(r.slopes_total);
+                <tbody>
+                  {filteredRows.length === 0 && !loading ? (
+                    <tr>
+                      <td colSpan={9} style={{ padding: 14, color: "#64748b", fontSize: 13 }}>
+                        Brak wyników dla wybranych filtrów.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRows.map((r, idx) => {
+                      const s = normalizeResortStatus(r.status_norm);
 
-                    const liftsOpen = n0(r.lifts_open);
-                    const liftsTotal = n0(r.lifts_total);
+                      const openKm = n0(r.open_km);
+                      const slopesOpen = n0(r.slopes_open);
+                      const slopesTotal = n0(r.slopes_total);
 
-                    const pphOpen = n0(r.lifts_capacity_open_pph);
+                      const liftsOpen = n0(r.lifts_open);
+                      const liftsTotal = n0(r.lifts_total);
 
-                    const hasPrice = r.skipass_price !== null && Number.isFinite(Number(r.skipass_price));
-                    const price = Number(r.skipass_price ?? 0);
-                    const cur = (r.skipass_currency ?? "PLN").toUpperCase();
+                      const pphOpen = n0(r.lifts_capacity_open_pph);
 
-                    const sublineParts = [r.city, r.region].filter((x) => !!(x && String(x).trim().length > 0)) as string[];
-                    const subline = sublineParts.length > 0 ? sublineParts.join(" • ") : null;
+                      const hasPrice = r.skipass_price !== null && Number.isFinite(Number(r.skipass_price));
+                      const price = Number(r.skipass_price ?? 0);
+                      const cur = (r.skipass_currency ?? "PLN").toUpperCase();
 
-                    return (
-                      <tr key={(r.id as any) ?? idx} style={{ borderTop: "1px solid #f1f5f9" }}>
-                        <Td style={{ whiteSpace: "normal" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                            <div
-                              style={{
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                minWidth: 0,
-                              }}
-                              title={r.name ?? "—"}
-                            >
-                              <Link
-                                href={`/resort/${resortSlug(r)}--${r.id}`}
-                                style={{ fontWeight: 800, color: "#0f172a", textDecoration: "none" }}
+                      const sublineParts = [r.city, r.region].filter((x) => !!(x && String(x).trim().length > 0)) as string[];
+                      const subline = sublineParts.length > 0 ? sublineParts.join(" • ") : null;
+
+                      return (
+                        <tr key={(r.id as any) ?? idx} style={{ borderTop: "1px solid #f1f5f9" }}>
+                          <Td style={{ whiteSpace: "normal" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                              <div
+                                style={{
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  minWidth: 0,
+                                }}
+                                title={r.name ?? "—"}
                               >
-                                {r.name ?? "—"}
-                              </Link>
-                            </div>
-                          </div>
-
-                          {subline ? (
-                            <div
-                              style={{
-                                color: "#94a3b8",
-                                fontSize: 12,
-                                marginTop: 2,
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}
-                              title={subline}
-                            >
-                              {subline}
-                            </div>
-                          ) : null}
-                        </Td>
-
-                        <Td>
-                          <span style={statusPillStyle(s)}>
-                            <span style={dotStyle(s)} />
-                            {statusLabel(s)}
-                          </span>
-                        </Td>
-
-                        <Td style={{ textAlign: "left" }}>{`${slopesOpen} / ${slopesTotal}`}</Td>
-                        <Td style={{ textAlign: "left" }}>{`${round1(openKm)} km`}</Td>
-
-                        <Td style={{ textAlign: "left" }}>
-                          {hasPrice ? (
-                            <>
-                              {r.skipass_url ? (
-                                <a
-                                  href={r.skipass_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  style={{
-                                    color: "#0f172a",
-                                    textDecoration: "underline",
-                                    textUnderlineOffset: 3,
-                                    fontWeight: 400,
-                                    whiteSpace: "nowrap",
-                                  }}
-                                  title="Cennik skipassa"
+                                <Link
+                                  href={`/resort/${resortSlug(r)}--${r.id}`}
+                                  style={{ fontWeight: 800, color: "#0f172a", textDecoration: "none" }}
                                 >
-                                  {fmtMoney(price, cur)}
-                                </a>
-                              ) : (
-                                <span style={{ fontWeight: 400, whiteSpace: "nowrap" }}>{fmtMoney(price, cur)}</span>
-                              )}
+                                  {r.name ?? "—"}
+                                </Link>
+                              </div>
+                            </div>
 
-                              {r.skipass_label ? (
-                                <div
-                                  style={{
-                                    marginTop: 2,
-                                    fontSize: 11,
-                                    color: "#94a3b8",
-                                    whiteSpace: "nowrap",
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    lineHeight: 1.2,
-                                  }}
-                                  title={r.skipass_label}
-                                >
-                                  {r.skipass_label}
-                                </div>
-                              ) : null}
-                            </>
-                          ) : (
-                            <span style={{ color: "#94a3b8" }}>—</span>
-                          )}
-                        </Td>
+                            {subline ? (
+                              <div
+                                style={{
+                                  color: "#94a3b8",
+                                  fontSize: 12,
+                                  marginTop: 2,
+                                  whiteSpace: "nowrap",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                }}
+                                title={subline}
+                              >
+                                {subline}
+                              </div>
+                            ) : null}
+                          </Td>
 
-                        <Td style={{ textAlign: "left" }}>{`${liftsOpen} / ${liftsTotal}`}</Td>
+                          <Td>
+                            <span style={statusPillStyle(s)}>
+                              <span style={dotStyle(s)} />
+                              {statusLabel(s)}
+                            </span>
+                          </Td>
 
-                        <Td style={{ textAlign: "left" }}>
-                          {pphOpen > 0 ? (
-                            <span style={{ fontWeight: 400, whiteSpace: "nowrap" }}>{fmtPPH(pphOpen)}</span>
-                          ) : (
-                            <span style={{ color: "#94a3b8" }}>—</span>
-                          )}
-                        </Td>
+                          <Td style={{ textAlign: "left" }}>{`${slopesOpen} / ${slopesTotal}`}</Td>
+                          <Td style={{ textAlign: "left" }}>{`${round1(openKm)} km`}</Td>
 
-                        <Td style={{ textAlign: "left" }} title={fmtDate(r.last_checked_at)}>
-                          {fmtDateShort(r.last_checked_at)}
-                        </Td>
+                          <Td style={{ textAlign: "left" }}>
+                            {hasPrice ? (
+                              <>
+                                {r.skipass_url ? (
+                                  <a
+                                    href={r.skipass_url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    style={{
+                                      color: "#0f172a",
+                                      textDecoration: "underline",
+                                      textUnderlineOffset: 3,
+                                      fontWeight: 400,
+                                      whiteSpace: "nowrap",
+                                    }}
+                                    title="Cennik skipassa"
+                                  >
+                                    {fmtMoney(price, cur)}
+                                  </a>
+                                ) : (
+                                  <span style={{ fontWeight: 400, whiteSpace: "nowrap" }}>{fmtMoney(price, cur)}</span>
+                                )}
 
-                        <Td>
-                          {r.url ? (
-                            <a
-                              href={r.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{
-                                color: "#0f172a",
-                                textDecoration: "underline",
-                                textUnderlineOffset: 3,
-                                fontWeight: 650,
-                              }}
-                            >
-                              strona
-                            </a>
-                          ) : (
-                            "—"
-                          )}
-                        </Td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                                {r.skipass_label ? (
+                                  <div
+                                    style={{
+                                      marginTop: 2,
+                                      fontSize: 11,
+                                      color: "#94a3b8",
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      lineHeight: 1.2,
+                                    }}
+                                    title={r.skipass_label}
+                                  >
+                                    {r.skipass_label}
+                                  </div>
+                                ) : null}
+                              </>
+                            ) : (
+                              <span style={{ color: "#94a3b8" }}>—</span>
+                            )}
+                          </Td>
+
+                          <Td style={{ textAlign: "left" }}>{`${liftsOpen} / ${liftsTotal}`}</Td>
+
+                          <Td style={{ textAlign: "left" }}>
+                            {pphOpen > 0 ? (
+                              <span style={{ fontWeight: 400, whiteSpace: "nowrap" }}>{fmtPPH(pphOpen)}</span>
+                            ) : (
+                              <span style={{ color: "#94a3b8" }}>—</span>
+                            )}
+                          </Td>
+
+                          <Td style={{ textAlign: "left" }} title={fmtDate(r.last_checked_at)}>
+                            {fmtDateShort(r.last_checked_at)}
+                          </Td>
+
+                          <Td>
+                            {r.url ? (
+                              <a
+                                href={r.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  color: "#0f172a",
+                                  textDecoration: "underline",
+                                  textUnderlineOffset: 3,
+                                  fontWeight: 650,
+                                }}
+                              >
+                                strona
+                              </a>
+                            ) : (
+                              "—"
+                            )}
+                          </Td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: 12,
+                borderTop: "1px solid #e2e8f0",
+                background: "#ffffff",
+                gap: 10,
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || loading}
+                style={pagerBtnStyle(page <= 1 || loading)}
+              >
+                ← Poprzednia
+              </button>
+
+              <div style={{ color: "#64748b", fontSize: 12 }}>
+                {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z{" "}
+                {totalCount}
+                {minOpenKm > 0 ? (
+                  <span style={{ marginLeft: 8, color: "#94a3b8" }}>
+                    • po filtrze open_km: {filteredRows.length} na tej stronie
+                  </span>
+                ) : null}
+              </div>
+
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || loading}
+                style={pagerBtnStyle(page >= totalPages || loading)}
+              >
+                Następna →
+              </button>
+            </div>
           </div>
+        </div>
 
+        {/* ✅ paginacja pod kartami (mobile) */}
+        <div className={forceCards ? "forceShow" : forceTable ? "hide" : "mobileOnly"} style={{ marginTop: 10 }}>
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
               padding: 12,
-              borderTop: "1px solid #e2e8f0",
+              border: "1px solid #e2e8f0",
+              borderRadius: 14,
               background: "#ffffff",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page <= 1 || loading}
-              style={btnStyle(page <= 1 || loading)}
+              style={pagerBtnStyle(page <= 1 || loading)}
             >
               ← Poprzednia
             </button>
 
             <div style={{ color: "#64748b", fontSize: 12 }}>
-              {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z {totalCount}
-              {minOpenKm > 0 ? (
-                <span style={{ marginLeft: 8, color: "#94a3b8" }}>• po filtrze open_km: {filteredRows.length} na tej stronie</span>
-              ) : null}
+              {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z{" "}
+              {totalCount}
             </div>
 
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages || loading}
-              style={btnStyle(page >= totalPages || loading)}
+              style={pagerBtnStyle(page >= totalPages || loading)}
             >
               Następna →
             </button>
@@ -756,12 +1005,81 @@ export default function Home() {
           }}
         >
           Dane prezentowane na stronie pochodzą bezpośrednio od ośrodków narciarskich, z kamer online oraz z wizji lokalnych.
-          Informacje są aktualizowane codziennie i mogą różnić się od stanu faktycznego w danym momencie. W razie znalezienia błędów
-          lub braków resortów proszę o kontakt :{" "}
+          Informacje są aktualizowane codziennie i mogą różnić się od stanu faktycznego w danym momencie. W razie znalezienia
+          błędów lub braków resortów proszę o kontakt :{" "}
           <a href="mailto:kontakt@otwartestoki.pl" style={{ color: "#2563eb", fontWeight: 800, textDecoration: "none" }}>
             kontakt@otwartestoki.pl
           </a>
         </div>
+
+        <style jsx>{`
+          .tilesGrid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+            margin-bottom: 14px;
+          }
+
+          .filtersGrid {
+            display: grid;
+            grid-template-columns: 2fr 1fr 1fr;
+            gap: 10px;
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 14px;
+            margin-bottom: 12px;
+            background: #ffffff;
+          }
+
+          .desktopOnly {
+            display: block;
+          }
+          .mobileOnly {
+            display: none;
+          }
+          .hide {
+            display: none;
+          }
+
+          /* 🔑 wymuszenia widoku */
+          .forceShow {
+            display: block;
+          }
+          .forceShowTable {
+            display: block;
+          }
+
+          /* mobile top bar */
+          .mobileTopBar {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(10px);
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 12px;
+            margin-bottom: 12px;
+          }
+
+          @media (max-width: 820px) {
+            .tilesGrid {
+              grid-template-columns: 1fr;
+            }
+
+            .filtersGrid {
+              grid-template-columns: 1fr;
+            }
+
+            .desktopOnly {
+              display: none;
+            }
+            .mobileOnly {
+              display: block;
+            }
+          }
+        `}</style>
       </main>
     </div>
   );
@@ -779,21 +1097,18 @@ function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string 
         background: "#fafcff",
       }}
     >
-      {/* ✅ zamiast SVG: obrazek z /public/baner.png */}
-      <img
-        src="/baner.png"
-        alt="otwartestoki banner"
-        width={1200}
-        height={300}
-        style={{
-          display: "block",
-          width: "100%",
-          height: 200, // trzyma poprzednią wysokość wizualną
-          objectFit: "cover",
-          background: "#fafcff",
-        }}
-      />
-
+ <img
+  src="/baner.png"
+  alt="otwartestoki banner"
+  style={{
+    display: "block",
+    width: "100%",
+    height: "clamp(120px, 20vw, 220px)", // mobile->desktop
+    objectFit: "cover",
+    objectPosition: "center",
+    background: "#fafcff",
+  }}
+/>
       <div
         style={{
           display: "flex",
@@ -808,6 +1123,316 @@ function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string 
       >
         Globalna aktualizacja (statystyki): <b style={{ color: "#0f172a" }}>{fmtDate(globalStatsUpdatedAt)}</b>
       </div>
+    </div>
+  );
+}
+
+/* ===================== BOTTOM SHEET ===================== */
+
+function BottomSheet({
+  open,
+  title,
+  onClose,
+  children,
+  footer,
+}: {
+  open: boolean;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  // zamykanie ESC
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  // blokuj scroll tła
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  return (
+    <>
+      <div
+        className="bsOverlay"
+        style={{
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? "auto" : "none",
+        }}
+        onClick={onClose}
+      />
+
+      <div
+        className="bsPanel"
+        style={{
+          transform: open ? "translateY(0)" : "translateY(110%)",
+        }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div
+          style={{
+            padding: 14,
+            borderBottom: "1px solid #e2e8f0",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <div style={{ fontWeight: 950, color: "#0f172a" }}>{title}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              border: "1px solid #e2e8f0",
+              background: "#ffffff",
+              borderRadius: 12,
+              height: 36,
+              padding: "0 12px",
+              fontWeight: 900,
+              color: "#0f172a",
+            }}
+          >
+            Zamknij
+          </button>
+        </div>
+
+        <div style={{ padding: 14, overflowY: "auto", maxHeight: "calc(85vh - 70px - 76px)" }}>{children}</div>
+
+        <div
+          style={{
+            padding: 14,
+            borderTop: "1px solid #e2e8f0",
+            background: "#ffffff",
+          }}
+        >
+          {footer}
+        </div>
+      </div>
+
+      <style jsx>{`
+        .bsOverlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.5);
+          transition: opacity 180ms ease;
+          z-index: 80;
+        }
+        .bsPanel {
+          position: fixed;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          z-index: 90;
+          background: #ffffff;
+          border-top-left-radius: 18px;
+          border-top-right-radius: 18px;
+          border: 1px solid #e2e8f0;
+          box-shadow: 0 -10px 30px rgba(15, 23, 42, 0.18);
+          transition: transform 220ms ease;
+          max-height: 85vh;
+        }
+      `}</style>
+    </>
+  );
+}
+
+/* ===================== MOBILE CARDS ===================== */
+
+function ResortCards({ rows, loading }: { rows: ResortRow[]; loading: boolean }) {
+  if (rows.length === 0 && !loading) {
+    return (
+      <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, background: "#fff", padding: 14, color: "#64748b" }}>
+        Brak wyników dla wybranych filtrów.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      {rows.map((r, idx) => {
+        const s = normalizeResortStatus(r.status_norm);
+
+        const openKm = n0(r.open_km);
+        const totalKm = n0(r.total_km);
+
+        const slopesOpen = n0(r.slopes_open);
+        const slopesTotal = n0(r.slopes_total);
+
+        const liftsOpen = n0(r.lifts_open);
+        const liftsTotal = n0(r.lifts_total);
+
+        const pphOpen = n0(r.lifts_capacity_open_pph);
+
+        const hasPrice = r.skipass_price !== null && Number.isFinite(Number(r.skipass_price));
+        const price = Number(r.skipass_price ?? 0);
+        const cur = (r.skipass_currency ?? "PLN").toUpperCase();
+
+        const sublineParts = [r.city, r.region].filter((x) => !!(x && String(x).trim().length > 0)) as string[];
+        const subline = sublineParts.length > 0 ? sublineParts.join(" • ") : null;
+
+        return (
+          <div
+            key={(r.id as any) ?? idx}
+            style={{
+              border: "1px solid #e2e8f0",
+              borderRadius: 16,
+              background: "#ffffff",
+              padding: 12,
+              boxShadow: "0 1px 0 rgba(15,23,42,0.04)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <Link
+                  href={`/resort/${resortSlug(r)}--${r.id}`}
+                  style={{ fontWeight: 900, color: "#0f172a", textDecoration: "none" }}
+                >
+                  {r.name ?? "—"}
+                </Link>
+
+                {subline ? (
+                  <div
+                    style={{
+                      marginTop: 2,
+                      color: "#94a3b8",
+                      fontSize: 12,
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      maxWidth: "100%",
+                    }}
+                    title={subline}
+                  >
+                    {subline}
+                  </div>
+                ) : null}
+              </div>
+
+              <span style={statusPillStyle(s)}>
+                <span style={dotStyle(s)} />
+                {statusLabel(s)}
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+              <MiniStat label="Otwarte km" value={`${round1(openKm)} km`} sub={totalKm > 0 ? `z ${round1(totalKm)} km` : undefined} />
+              <MiniStat label="Trasy" value={`${slopesOpen} / ${slopesTotal}`} />
+              <MiniStat label="Wyciągi" value={`${liftsOpen} / ${liftsTotal}`} />
+              <MiniStat label="Przepustowość" value={pphOpen > 0 ? fmtPPH(pphOpen) : "—"} />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 10, alignItems: "center" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Skipass</div>
+                {hasPrice ? (
+                  r.skipass_url ? (
+                    <a
+                      href={r.skipass_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "#0f172a", textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 800 }}
+                      title="Cennik skipassa"
+                    >
+                      {fmtMoney(price, cur)}
+                    </a>
+                  ) : (
+                    <span style={{ fontWeight: 800, color: "#0f172a" }}>{fmtMoney(price, cur)}</span>
+                  )
+                ) : (
+                  <span style={{ color: "#94a3b8" }}>—</span>
+                )}
+
+                {r.skipass_label ? (
+                  <div
+                    style={{
+                      marginTop: 2,
+                      fontSize: 11,
+                      color: "#94a3b8",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                    title={r.skipass_label}
+                  >
+                    {r.skipass_label}
+                  </div>
+                ) : null}
+              </div>
+
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Aktualizacja</div>
+                <div style={{ fontSize: 12, color: "#0f172a", fontWeight: 700 }} title={fmtDate(r.last_checked_at)}>
+                  {fmtDateShort(r.last_checked_at)}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+              <Link
+                href={`/resort/${resortSlug(r)}--${r.id}`}
+                style={{
+                  flex: 1,
+                  textAlign: "center",
+                  padding: "12px 12px",
+                  borderRadius: 14,
+                  border: "1px solid #e2e8f0",
+                  background: "#0f172a",
+                  color: "#ffffff",
+                  fontWeight: 900,
+                  textDecoration: "none",
+                }}
+              >
+                Szczegóły
+              </Link>
+
+              <a
+                href={r.url ?? "#"}
+                target={r.url ? "_blank" : undefined}
+                rel={r.url ? "noreferrer" : undefined}
+                aria-disabled={!r.url}
+                style={{
+                  flex: 1,
+                  textAlign: "center",
+                  padding: "12px 12px",
+                  borderRadius: 14,
+                  border: "1px solid #e2e8f0",
+                  background: r.url ? "#ffffff" : "#f8fafc",
+                  color: r.url ? "#0f172a" : "#94a3b8",
+                  fontWeight: 900,
+                  textDecoration: "none",
+                  pointerEvents: r.url ? "auto" : "none",
+                }}
+              >
+                Strona ośrodka
+              </a>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MiniStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div style={{ border: "1px solid #f1f5f9", borderRadius: 14, padding: 10, background: "#fbfdff" }}>
+      <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.15 }}>{value}</div>
+      {sub ? <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{sub}</div> : null}
     </div>
   );
 }
@@ -843,7 +1468,6 @@ function Th({ children, style }: { children: any; style?: any }) {
   );
 }
 
-/** ✅ ZMIANA: Td przyjmuje normalne propsy <td>, więc można używać m.in. title= */
 type TdProps = React.TdHTMLAttributes<HTMLTableCellElement>;
 
 function Td({ children, style, ...props }: TdProps) {
@@ -866,6 +1490,55 @@ function Td({ children, style, ...props }: TdProps) {
   );
 }
 
+/* ===================== shared styles ===================== */
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  border: "1px solid #e2e8f0",
+  borderRadius: 12,
+  outline: "none",
+  background: "#fbfdff",
+};
+
+const selectStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 12px",
+  border: "1px solid #e2e8f0",
+  borderRadius: 12,
+  background: "#fbfdff",
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 12,
+  color: "#64748b",
+  marginBottom: 6,
+};
+
+const checkboxRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  marginTop: 10,
+  fontSize: 13,
+  color: "#0f172a",
+  userSelect: "none",
+};
+
+function pagerBtnStyle(disabled: boolean) {
+  return {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #e2e8f0",
+    background: disabled ? "#f8fafc" : "#ffffff",
+    color: disabled ? "#94a3b8" : "#0f172a",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontWeight: 800,
+    fontSize: 13,
+  } as const;
+}
+
 function btnStyle(disabled: boolean) {
   return {
     padding: "10px 12px",
@@ -874,7 +1547,8 @@ function btnStyle(disabled: boolean) {
     background: disabled ? "#f8fafc" : "#ffffff",
     color: disabled ? "#94a3b8" : "#0f172a",
     cursor: disabled ? "not-allowed" : "pointer",
-    fontWeight: 700,
-    fontSize: 13,
+    fontWeight: 800,
+    fontSize: 12,
+    whiteSpace: "nowrap",
   } as const;
 }
