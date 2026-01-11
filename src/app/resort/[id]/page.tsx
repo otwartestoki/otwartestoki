@@ -1479,18 +1479,25 @@ function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string 
       }}
     >
       {/* ✅ identycznie jak na stronie głównej */}
-      <img
-        src="/baner.png"
-        alt="otwartestoki banner"
-        style={{
-          display: "block",
-          width: "100%",
-          height: "clamp(120px, 20vw, 220px)",
-          objectFit: "cover",
-          objectPosition: "center",
-          background: "#fafcff",
-        }}
-      />
+<div
+  style={{
+    width: "100%",
+    aspectRatio: "1470 / 300", // ✅ proporcje logo
+    background: "#fafcff",
+  }}
+>
+  <img
+    src="/baner.png"
+    alt="otwartestoki banner"
+    style={{
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+      objectPosition: "center",
+      display: "block",
+    }}
+  />
+</div>
 
       <div
         style={{
