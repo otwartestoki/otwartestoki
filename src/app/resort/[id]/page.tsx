@@ -6,20 +6,29 @@ import { supabase } from "@/lib/supabaseClient";
 
 /* ===================== TYPES ===================== */
 
-type Resort = {
+type ResortPublic = {
   id: string | number;
   name?: string | null;
   region?: string | null;
   city?: string | null;
-  status?: string | null;
-  last_checked_at?: string | null;
-  url?: string | null;
+  country?: string | null;
 
-  trail_map_url?: string | null;
-  webcam_url?: string | null;
+  // ✅ jedyna aktualizacja na stronie
+  resort_updated_at?: string | null;
 
   resort_stats?: ResortStats | null;
 };
+
+type ResortBase = {
+  id: string | number;
+  url?: string | null;
+
+  // ❗ bierzemy z tabeli resorts (bo view nie ma)
+  trail_map_url?: string | null;
+  webcam_url?: string | null;
+};
+
+type Resort = ResortPublic & ResortBase;
 
 type ResortStats = {
   slopes_open: number | null;
@@ -35,6 +44,7 @@ type ResortStats = {
   skipass_url: string | null;
   skipass_label: string | null;
 
+  // zostaje w danych, ale NIE pokazujemy jako aktualizację
   stats_updated_at: string | null;
 };
 
@@ -105,13 +115,27 @@ type SkipassPrice = {
   created_at: string | null;
 };
 
-/* ===================== UTILS ===================== */
+/* ===================== HELPERS (jak na głównej) ===================== */
 
 function fmtDate(d?: string | null) {
   if (!d) return "—";
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return d;
-  return dt.toLocaleString("pl-PL");
+  return dt.toLocaleString("pl-PL", { timeZone: "Europe/Warsaw", hourCycle: "h23" });
+}
+
+function fmtDateShort(d?: string | null) {
+  if (!d) return "—";
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return d;
+  return dt.toLocaleString("pl-PL", {
+    timeZone: "Europe/Warsaw",
+    hourCycle: "h23",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function fmtMoney(x: number, currency: string) {
@@ -120,37 +144,6 @@ function fmtMoney(x: number, currency: string) {
     return x.toLocaleString("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 });
   }
   return `${x.toFixed(0)} ${cur}`;
-}
-
-function durationPL(v?: number | null, unit?: string | null) {
-  if (!v || !unit) return null;
-  const u = String(unit).toLowerCase().trim();
-
-  if (u.startsWith("day") || u === "d") return v === 1 ? "1 dzień" : `${v} dni`;
-  if (u.startsWith("hour") || u === "h" || u === "hr") return v === 1 ? "1 godz." : `${v} godz.`;
-  if (u.startsWith("min")) return `${v} min`;
-  if (u.startsWith("week")) return v === 1 ? "1 tydz." : `${v} tyg.`;
-  if (u.startsWith("month")) return v === 1 ? "1 mies." : `${v} mies.`;
-  if (u.startsWith("season")) return "sezon";
-  return `${v} ${unit}`;
-}
-
-function labelFromPrice(p?: SkipassPrice | null) {
-  if (!p) return null;
-  const dur = durationPL(p.duration_value, p.duration_unit);
-  const cat = p.category ? String(p.category).trim() : "";
-  const pieces = [cat, dur].filter((x) => x && String(x).trim().length);
-  return pieces.length ? pieces.join(" • ") : null;
-}
-
-function isValidInRange(p: SkipassPrice, at: Date) {
-  const from = p.valid_from ? new Date(p.valid_from) : null;
-  const to = p.valid_to ? new Date(p.valid_to) : null;
-
-  const fromOk = !from || Number.isNaN(from.getTime()) ? true : at.getTime() >= from.getTime();
-  const toOk = !to || Number.isNaN(to.getTime()) ? true : at.getTime() <= to.getTime();
-
-  return fromOk && toOk;
 }
 
 function parseResortId(raw: unknown): string | null {
@@ -171,8 +164,8 @@ function slugifyPL(input: string) {
     .replace(/(^-+|-+$)/g, "");
 }
 
-function resortSlug(r: { name?: string | null; city?: string | null; region?: string | null }) {
-  const parts = [r.name, r.city, r.region].filter((x) => x && String(x).trim().length) as string[];
+function resortSlug(r: { name?: string | null; city?: string | null; region?: string | null; country?: string | null }) {
+  const parts = [r.name, r.city, r.region, r.country].filter((x) => x && String(x).trim().length) as string[];
   const base = parts.join(" ");
   const slug = slugifyPL(base);
   return slug.length ? slug : "resort";
@@ -305,6 +298,39 @@ function useIsMobile(breakpointPx = 860) {
   return isMobile;
 }
 
+/* ===================== SKIPASS HELPERS ===================== */
+
+function durationPL(v?: number | null, unit?: string | null) {
+  if (!v || !unit) return null;
+  const u = String(unit).toLowerCase().trim();
+
+  if (u.startsWith("day") || u === "d") return v === 1 ? "1 dzień" : `${v} dni`;
+  if (u.startsWith("hour") || u === "h" || u === "hr") return v === 1 ? "1 godz." : `${v} godz.`;
+  if (u.startsWith("min")) return `${v} min`;
+  if (u.startsWith("week")) return v === 1 ? "1 tydz." : `${v} tyg.`;
+  if (u.startsWith("month")) return v === 1 ? "1 mies." : `${v} mies.`;
+  if (u.startsWith("season")) return "sezon";
+  return `${v} ${unit}`;
+}
+
+function labelFromPrice(p?: SkipassPrice | null) {
+  if (!p) return null;
+  const dur = durationPL(p.duration_value, p.duration_unit);
+  const cat = p.category ? String(p.category).trim() : "";
+  const pieces = [cat, dur].filter((x) => x && String(x).trim().length);
+  return pieces.length ? pieces.join(" • ") : null;
+}
+
+function isValidInRange(p: SkipassPrice, at: Date) {
+  const from = p.valid_from ? new Date(p.valid_from) : null;
+  const to = p.valid_to ? new Date(p.valid_to) : null;
+
+  const fromOk = !from || Number.isNaN(from.getTime()) ? true : at.getTime() >= from.getTime();
+  const toOk = !to || Number.isNaN(to.getTime()) ? true : at.getTime() <= to.getTime();
+
+  return fromOk && toOk;
+}
+
 /* ===================== PAGE ===================== */
 
 export default function ResortPage() {
@@ -324,6 +350,10 @@ export default function ResortPage() {
 
   const [mapOpen, setMapOpen] = useState(false);
 
+  const [slopesOpenUI, setSlopesOpenUI] = useState(false);
+  const [liftsOpenUI, setLiftsOpenUI] = useState(false);
+  const [skipassOpenUI, setSkipassOpenUI] = useState(false);
+
   const [skipassRows, setSkipassRows] = useState<
     Array<{
       product: SkipassProduct;
@@ -335,15 +365,12 @@ export default function ResortPage() {
     }>
   >([]);
 
-  const [slopesOpenUI, setSlopesOpenUI] = useState(false);
-  const [liftsOpenUI, setLiftsOpenUI] = useState(false);
-  const [skipassOpenUI, setSkipassOpenUI] = useState(false); // ✅ domyślnie zamknięte
-
+  // map zoom
   const [zoom, setZoom] = useState(1);
   const [fitZoom, setFitZoom] = useState(1);
-  const ZOOM_MIN = 0.25;
+  const ZOOM_MIN = 0.01;
   const ZOOM_MAX = 4;
-  const ZOOM_STEP = 0.25;
+  const ZOOM_STEP = 0.1;
 
   const mapViewportRef = useRef<HTMLDivElement | null>(null);
   const mapImgRef = useRef<HTMLImageElement | null>(null);
@@ -403,6 +430,9 @@ export default function ResortPage() {
     if (!url) return;
     window.open(url, "_blank", "noopener,noreferrer");
   }
+
+  // ✅ jedyna aktualizacja na stronie resortu
+  const upd = resort?.resort_updated_at ?? null;
 
   async function loadSkipasses(resortUuid: string) {
     const cov = await supabase
@@ -524,19 +554,17 @@ export default function ResortPage() {
     setLoading(true);
     setError(null);
 
-    const r = await supabase
-      .from("resorts")
+    // 1) ✅ bierzemy aktualizację + dane UI z VIEW (jak na głównej)
+    const pub = await supabase
+      .from("resorts_public_list")
       .select(
         `
         id,
         name,
         region,
         city,
-        status,
-        last_checked_at,
-        url,
-        trail_map_url,
-        webcam_url,
+        country,
+        resort_updated_at,
         resort_stats (
           slopes_open,
           slopes_total,
@@ -555,17 +583,17 @@ export default function ResortPage() {
       .eq("id", String(resortId))
       .maybeSingle();
 
-    if (r.error) {
+    if (pub.error) {
       setResort(null);
       setSlopes([]);
       setLifts([]);
       setSkipassRows([]);
-      setError(r.error.message);
+      setError(pub.error.message);
       setLoading(false);
       return;
     }
 
-    if (!r.data) {
+    if (!pub.data) {
       setResort(null);
       setSlopes([]);
       setLifts([]);
@@ -575,12 +603,30 @@ export default function ResortPage() {
       return;
     }
 
-    setResort(r.data as any);
+    // 2) ✅ URL mapy/kamer/strony z tabeli resorts (bo view ich nie ma)
+    const base = await supabase
+      .from("resorts")
+      .select("id,url,trail_map_url,webcam_url")
+      .eq("id", String(resortId))
+      .maybeSingle();
 
-    const canonical = `${resortSlug(r.data as any)}--${(r.data as any).id}`;
+    if (base.error) {
+      // nie blokujemy całej strony – brak url-i to nie dramat
+      console.warn("[resorts base]", base.error);
+    }
+
+    const merged: Resort = {
+      ...(pub.data as any),
+      ...(base.data as any),
+    };
+
+    setResort(merged);
+
+    // canonical slug
+    const canonical = `${resortSlug(merged)}--${(merged as any).id}`;
     if (rawParam && rawParam !== canonical) router.replace(`/resort/${canonical}`);
 
-    await loadSkipasses(String((r.data as any).id));
+    await loadSkipasses(String((merged as any).id));
 
     const s = await supabase
       .from("slopes")
@@ -623,6 +669,7 @@ export default function ResortPage() {
   }, [mapOpen]);
 
   const stats = resort?.resort_stats ?? null;
+
   const slopesOpen = Number(stats?.slopes_open ?? 0);
   const slopesTotal = Number(stats?.slopes_total ?? 0);
   const openKm = Number(stats?.open_km ?? 0);
@@ -656,7 +703,14 @@ export default function ResortPage() {
   const hasMap = Boolean(resort?.trail_map_url);
   const hasWebcam = Boolean(resort?.webcam_url && resort.webcam_url.trim().length > 0);
 
-  const headerSubline = `${resort?.city ?? "—"}${resort?.region ? ` • ${resort.region}` : ""}`;
+  const headerSubline =
+    [resort?.city, resort?.region, resort?.country].filter((x) => x && String(x).trim().length).join(" • ") || "—";
+
+  function openWebcam() {
+    const url = resort?.webcam_url?.trim();
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 
   return (
     <div
@@ -665,12 +719,11 @@ export default function ResortPage() {
         minHeight: "100vh",
         background: "#ffffff",
         fontFamily: "system-ui, Arial",
-        overflowX: "hidden", // ✅ FIX: blokada poziomego scrolla na mobile
+        overflowX: "hidden",
       }}
     >
-      {/* ✅ responsywne layouty (bez Tailwinda) */}
       <style>{`
-        .rt-root, .rt-root * { box-sizing: border-box; } /* ✅ FIX */
+        .rt-root, .rt-root * { box-sizing: border-box; }
         .rt-top { display:flex; justify-content:space-between; gap:16px; align-items:flex-end; }
         .rt-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
         .rt-grid2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
@@ -683,7 +736,8 @@ export default function ResortPage() {
       `}</style>
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 20px 0" }}>
-        <ContentBanner globalStatsUpdatedAt={stats?.stats_updated_at ?? null} />
+        {/* ✅ banner jak na głównej, ale timestamp = resort_updated_at */}
+        <ContentBanner updatedAt={upd} />
       </div>
 
       <main style={{ padding: 20, maxWidth: 1100, margin: "0 auto" }}>
@@ -693,7 +747,6 @@ export default function ResortPage() {
 
         <div className="rt-top" style={{ marginTop: 10 }}>
           <div style={{ minWidth: 0 }}>
-            {/* ✅ ujednolicony styl nagłówka (jak na głównej) */}
             <h1
               style={{
                 fontSize: 26,
@@ -724,12 +777,8 @@ export default function ResortPage() {
           </div>
 
           <div style={{ textAlign: isMobile ? "left" : "right", width: isMobile ? "100%" : "auto" }}>
-            <div style={{ color: "#64748b", fontSize: 12 }}>
-              Aktualizacja (resort): <b style={{ color: "#0f172a" }}>{fmtDate(resort?.last_checked_at ?? null)}</b>
-            </div>
-            <div style={{ marginTop: 6, color: "#94a3b8", fontSize: 12 }}>
-              Statystyki: <b style={{ color: "#0f172a" }}>{fmtDate(stats?.stats_updated_at ?? null)}</b>
-            </div>
+            {/* ✅ JEDYNA aktualizacja na tej stronie */}
+
 
             <div className="rt-actions" style={{ marginTop: 10 }}>
               {hasMap ? (
@@ -823,7 +872,6 @@ export default function ResortPage() {
                     >
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
                         <div style={{ fontWeight: 900, color: "#0f172a", minWidth: 0 }}>
-                          {/* ✅ FIX: stała kolumna numeru + elipsa nazwy */}
                           <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
                             <span
                               style={{
@@ -858,7 +906,6 @@ export default function ResortPage() {
                         </Marker>
                       </div>
 
-                      {/* ✅ FIX: minWidth:0 pomaga flexowi ściskać dzieci */}
                       <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
                         <Chip label={`Trudność: ${difficultyLabel(nd)}`} dot={d.dot} />
                         <Chip label={`Długość: ${s.length_m ? `${s.length_m} m` : "—"}`} />
@@ -868,7 +915,7 @@ export default function ResortPage() {
                       </div>
 
                       <div style={{ marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
-                        Aktualizacja: <b style={{ color: "#64748b" }}>{fmtDate(s.updated_at ?? null)}</b>
+                        Aktualizacja (trasa): <b style={{ color: "#64748b" }}>{fmtDate(s.updated_at ?? null)}</b>
                       </div>
                     </div>
                   );
@@ -968,7 +1015,6 @@ export default function ResortPage() {
             </div>
           )}
 
-          {/* ✅ Statystyka trudności tras – w środku zakładki "Trasy" */}
           <DifficultyStats kmByDifficulty={kmByDifficulty} totalKm={totalKm} totalKmAll={totalKmAll} />
         </CollapsibleSection>
 
@@ -992,40 +1038,15 @@ export default function ResortPage() {
                     const st = statusAccent(ns);
 
                     return (
-                      <div
-                        key={(l.id as any) ?? i}
-                        style={{
-                          border: "1px solid #e2e8f0",
-                          borderRadius: 14,
-                          padding: 12,
-                          background: "#fff",
-                        }}
-                      >
+                      <div key={(l.id as any) ?? i} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
                           <div style={{ fontWeight: 900, color: "#0f172a", minWidth: 0 }}>
-                            {/* ✅ FIX: stała kolumna numeru + elipsa nazwy */}
                             <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-                              <span
-                                style={{
-                                  minWidth: 28,
-                                  textAlign: "right",
-                                  color: "#94a3b8",
-                                  fontWeight: 900,
-                                  flex: "0 0 auto",
-                                }}
-                              >
+                              <span style={{ minWidth: 28, textAlign: "right", color: "#94a3b8", fontWeight: 900, flex: "0 0 auto" }}>
                                 {l.number ?? "—"}
                               </span>
-
                               <span
-                                style={{
-                                  minWidth: 0,
-                                  flex: "1 1 auto",
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  display: "block",
-                                }}
+                                style={{ minWidth: 0, flex: "1 1 auto", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" }}
                                 title={l.name ?? "—"}
                               >
                                 {l.name ?? "—"}
@@ -1038,7 +1059,6 @@ export default function ResortPage() {
                           </Marker>
                         </div>
 
-                        {/* ✅ FIX: minWidth:0 pomaga flexowi ściskać dzieci */}
                         <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
                           <Chip label={`Typ: ${l.type ?? "—"}`} />
                           <Chip label={`Miejsca: ${l.seats ?? "—"}`} />
@@ -1047,7 +1067,7 @@ export default function ResortPage() {
                         </div>
 
                         <div style={{ marginTop: 10, fontSize: 12, color: "#94a3b8" }}>
-                          Aktualizacja: <b style={{ color: "#64748b" }}>{fmtDate(l.updated_at ?? null)}</b>
+                          Aktualizacja (wyciąg): <b style={{ color: "#64748b" }}>{fmtDate(l.updated_at ?? null)}</b>
                         </div>
                       </div>
                     );
@@ -1084,20 +1104,11 @@ export default function ResortPage() {
                           const st = statusAccent(ns);
 
                           return (
-                            <tr
-                              key={(l.id as any) ?? i}
-                              style={{
-                                borderTop: "1px solid #f1f5f9",
-                                color: ns === "closed" ? "#64748b" : "#0f172a",
-                                background: "#ffffff",
-                              }}
-                            >
+                            <tr key={(l.id as any) ?? i} style={{ borderTop: "1px solid #f1f5f9", color: ns === "closed" ? "#64748b" : "#0f172a", background: "#ffffff" }}>
                               <Td>{l.number ?? "—"}</Td>
 
                               <Td strong>
-                                <div style={{ maxWidth: 280, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                                  {l.name ?? "—"}
-                                </div>
+                                <div style={{ maxWidth: 280, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.name ?? "—"}</div>
                               </Td>
 
                               <Td>{l.type ?? "—"}</Td>
@@ -1147,14 +1158,9 @@ export default function ResortPage() {
                     const label = row.label;
 
                     return (
-                      <div
-                        key={`${row.product.id}-${i}`}
-                        style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}
-                      >
+                      <div key={`${row.product.id}-${i}`} style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#fff" }}>
                         <div style={{ fontWeight: 900, color: "#0f172a" }}>{name}</div>
-                        {row.product.provider ? (
-                          <div style={{ marginTop: 2, fontSize: 12, color: "#94a3b8" }}>{row.product.provider}</div>
-                        ) : null}
+                        {row.product.provider ? <div style={{ marginTop: 2, fontSize: 12, color: "#94a3b8" }}>{row.product.provider}</div> : null}
 
                         <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
@@ -1170,12 +1176,7 @@ export default function ResortPage() {
                                   href={row.url}
                                   target="_blank"
                                   rel="noreferrer"
-                                  style={{
-                                    color: "#0f172a",
-                                    fontWeight: 900,
-                                    textDecoration: "underline",
-                                    textUnderlineOffset: 3,
-                                  }}
+                                  style={{ color: "#0f172a", fontWeight: 900, textDecoration: "underline", textUnderlineOffset: 3 }}
                                 >
                                   {fmtMoney(Number(row.price), cur)}
                                 </a>
@@ -1187,31 +1188,15 @@ export default function ResortPage() {
                             )}
                           </div>
 
-                          <div
-                            style={{
-                              color: "#94a3b8",
-                              fontSize: 12,
-                              whiteSpace: "nowrap",
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                            }}
-                            title={label ?? ""}
-                          >
+                          <div style={{ color: "#94a3b8", fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={label ?? ""}>
                             {label ?? "—"}
                           </div>
 
-                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                            {row.product.url ? (
-                              <a
-                                href={row.product.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={{ ...btnGhost(), textDecoration: "none" }}
-                              >
-                                Cennik
-                              </a>
-                            ) : null}
-                          </div>
+                          {row.product.url ? (
+                            <a href={row.product.url} target="_blank" rel="noreferrer" style={{ ...btnGhost(), textDecoration: "none", width: "fit-content" }}>
+                              Cennik
+                            </a>
+                          ) : null}
                         </div>
                       </div>
                     );
@@ -1231,7 +1216,7 @@ export default function ResortPage() {
                         <Th>Produkt</Th>
                         <Th style={{ width: 160 }}>Sezon</Th>
                         <Th style={{ width: 140 }}>Cena</Th>
-                        <Th style={{ width: 220 }}>Opis</Th>
+                        <Th style={{ width: 260 }}>Opis</Th>
                         <Th style={{ width: 90 }}>Link</Th>
                       </tr>
                     </thead>
@@ -1240,7 +1225,7 @@ export default function ResortPage() {
                       {skipassRows.length === 0 ? (
                         <tr>
                           <td colSpan={5} style={{ padding: 16, fontSize: 13, color: "#64748b" }}>
-                            Brak przypiętych skipassów dla tego resortu (skipass_coverage) lub brak aktualnych cen (valid_from/valid_to).
+                            Brak przypiętych skipassów (skipass_coverage) lub brak aktualnych cen (valid_from/valid_to).
                           </td>
                         </tr>
                       ) : (
@@ -1254,15 +1239,10 @@ export default function ResortPage() {
                           return (
                             <tr key={`${row.product.id}-${i}`} style={{ borderTop: "1px solid #f1f5f9", background: "#ffffff" }}>
                               <Td strong>
-                                <div
-                                  style={{ maxWidth: 360, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                                  title={name}
-                                >
+                                <div style={{ maxWidth: 360, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={name}>
                                   {name}
                                 </div>
-                                {row.product.provider ? (
-                                  <div style={{ marginTop: 2, fontSize: 11, color: "#94a3b8" }}>{row.product.provider}</div>
-                                ) : null}
+                                {row.product.provider ? <div style={{ marginTop: 2, fontSize: 11, color: "#94a3b8" }}>{row.product.provider}</div> : null}
                               </Td>
 
                               <Td>{season}</Td>
@@ -1274,13 +1254,7 @@ export default function ResortPage() {
                                       href={row.url}
                                       target="_blank"
                                       rel="noreferrer"
-                                      style={{
-                                        color: "#0f172a",
-                                        textDecoration: "underline",
-                                        textUnderlineOffset: 3,
-                                        fontWeight: 800,
-                                        whiteSpace: "nowrap",
-                                      }}
+                                      style={{ color: "#0f172a", textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 800, whiteSpace: "nowrap" }}
                                       title="Źródło ceny / cennik"
                                     >
                                       {fmtMoney(Number(row.price), cur)}
@@ -1302,7 +1276,7 @@ export default function ResortPage() {
                                       overflow: "hidden",
                                       textOverflow: "ellipsis",
                                       lineHeight: 1.2,
-                                      maxWidth: 220,
+                                      maxWidth: 240,
                                     }}
                                     title={label}
                                   >
@@ -1312,27 +1286,14 @@ export default function ResortPage() {
                               </Td>
 
                               <Td>
-                                <div
-                                  style={{ maxWidth: 220, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-                                  title={label ?? ""}
-                                >
+                                <div style={{ maxWidth: 260, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={label ?? ""}>
                                   {label ?? "—"}
                                 </div>
                               </Td>
 
                               <Td>
                                 {row.product.url ? (
-                                  <a
-                                    href={row.product.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style={{
-                                      color: "#0f172a",
-                                      textDecoration: "underline",
-                                      textUnderlineOffset: 3,
-                                      fontWeight: 700,
-                                    }}
-                                  >
+                                  <a href={row.product.url} target="_blank" rel="noreferrer" style={{ color: "#0f172a", textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 700 }}>
                                     cennik
                                   </a>
                                 ) : (
@@ -1435,7 +1396,7 @@ export default function ResortPage() {
                 >
                   <img
                     ref={mapImgRef}
-                    src={resort.trail_map_url}
+                    src={resort.trail_map_url ?? ""}
                     alt="Mapa tras"
                     onLoad={() => computeFitZoom()}
                     style={{ display: "block", maxWidth: "none", width: "auto", height: "auto" }}
@@ -1466,39 +1427,18 @@ export default function ResortPage() {
   );
 }
 
-/* ===================== BANNER ===================== */
+/* ===================== BANNER (jak na głównej) ===================== */
 
-function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string | null }) {
+function ContentBanner({ updatedAt }: { updatedAt: string | null }) {
   return (
-    <div
-      style={{
-        border: "1px solid #e2e8f0",
-        borderRadius: 16,
-        overflow: "hidden",
-        background: "#fafcff",
-      }}
-    >
-      {/* ✅ identycznie jak na stronie głównej */}
-<div
-  style={{
-    width: "100%",
-    aspectRatio: "1470 / 300", // ✅ proporcje logo
-    background: "#fafcff",
-  }}
->
-  <img
-    src="/baner.png"
-    alt="otwartestoki banner"
-    style={{
-      width: "100%",
-      height: "100%",
-      objectFit: "cover",
-      objectPosition: "center",
-      display: "block",
-    }}
-  />
-</div>
-
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 16, overflow: "hidden", background: "#fafcff" }}>
+      <div style={{ width: "100%", aspectRatio: "1470 / 300", background: "#fafcff" }}>
+        <img
+          src="/baner.png"
+          alt="otwartestoki banner"
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
+        />
+      </div>
       <div
         style={{
           display: "flex",
@@ -1511,7 +1451,7 @@ function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string 
           fontSize: 12,
         }}
       >
-        Globalna aktualizacja (statystyki): <b style={{ color: "#0f172a" }}>{fmtDate(globalStatsUpdatedAt)}</b>
+        Ostatnia aktualizacja: <b style={{ color: "#0f172a" }}>{fmtDate(updatedAt)}</b>
       </div>
     </div>
   );
@@ -1725,8 +1665,6 @@ function DifficultyStats({
   );
 }
 
-/* ===================== CHIP (FIX overflow) ===================== */
-
 function Chip({ label, dot }: { label: string; dot?: string }) {
   return (
     <span
@@ -1741,8 +1679,6 @@ function Chip({ label, dot }: { label: string; dot?: string }) {
         color: "#0f172a",
         fontSize: 12,
         fontWeight: 800,
-
-        // ✅ FIX: chip nie może rozpychać layoutu na mobile
         maxWidth: "100%",
         overflow: "hidden",
         textOverflow: "ellipsis",
@@ -1751,10 +1687,7 @@ function Chip({ label, dot }: { label: string; dot?: string }) {
       }}
       title={label}
     >
-      {dot ? (
-        <span style={{ width: 9, height: 9, borderRadius: 99, background: dot, display: "inline-block", flex: "0 0 auto" }} />
-      ) : null}
-
+      {dot ? <span style={{ width: 9, height: 9, borderRadius: 99, background: dot, display: "inline-block", flex: "0 0 auto" }} /> : null}
       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
     </span>
   );

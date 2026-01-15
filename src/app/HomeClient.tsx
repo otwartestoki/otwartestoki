@@ -2,8 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
-import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 /* ===================== TYPES ===================== */
 
@@ -12,6 +11,8 @@ type ResortRow = {
   name: string | null;
   region: string | null;
   city: string | null;
+
+  country: string | null;
 
   status_raw: string | null;
   status_norm: "open" | "closed" | string | null;
@@ -28,30 +29,28 @@ type ResortRow = {
   lifts_open: number | null;
   lifts_total: number | null;
 
-  // ✅ przepustowość (otwarta) na godzinę
   lifts_capacity_open_pph: number | null;
 
-  // ✅ te pola pochodzą bezpośrednio z RPC (które czyta widok resorts_public_list)
   skipass_price: number | null;
   skipass_currency: string | null;
   skipass_url: string | null;
-
-  // (opcjonalnie) opis skipassa pod ceną – jeśli RPC go kiedyś doda
   skipass_label: string | null;
 
   stats_updated_at: string | null;
 
-  // ✅ z RPC
   has_open_kids_tape?: boolean | null;
 
-  // ✅ zwracane przez RPC
   total_count?: number | null;
+
+  // ✅ najnowsza zmiana resortu/wyciągu/trasy (z VIEW): max(resort_updated_at)
+  resort_updated_at?: string | null;
 };
 
 type DifficultyFilter = "all" | "green" | "blue" | "red" | "black";
-
-/* ✅ sortowanie (SQL) */
 type SortKey = "open_km_desc" | "comfort_desc" | "pph_desc" | "updated_desc" | "price_asc";
+
+type RegionFilter = "all" | string;
+type CountryFilter = "all" | string;
 
 /* ===================== CONST ===================== */
 
@@ -62,9 +61,7 @@ const PAGE_SIZE = 15;
 function normalizeResortStatus(s?: string | null) {
   const v = (s ?? "").toLowerCase().trim();
   if (["open", "otwarty", "otwarta", "otwarte", "opened"].includes(v)) return "open";
-  if (
-    ["closed", "zamkniety", "zamknięty", "zamknieta", "zamknięta", "zamkniete", "zamknięte"].includes(v)
-  )
+  if (["closed", "zamkniety", "zamknięty", "zamknieta", "zamknięta", "zamkniete", "zamknięte"].includes(v))
     return "closed";
   return "closed";
 }
@@ -97,15 +94,16 @@ function fmtDate(d?: string | null) {
   if (!d) return "—";
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return d;
-  return dt.toLocaleString("pl-PL");
+  return dt.toLocaleString("pl-PL", { timeZone: "Europe/Warsaw", hourCycle: "h23" });
 }
 
-/* ✅ krótki format do kolumny tabeli */
 function fmtDateShort(d?: string | null) {
   if (!d) return "—";
   const dt = new Date(d);
   if (Number.isNaN(dt.getTime())) return d;
   return dt.toLocaleString("pl-PL", {
+    timeZone: "Europe/Warsaw",
+    hourCycle: "h23",
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -153,7 +151,7 @@ function sortLabel(k: SortKey) {
     case "pph_desc":
       return "Przepustowość (PPH) ↓";
     case "updated_desc":
-      return "Najnowsza aktualizacja ↓";
+      return "Aktualizacja ↓";
     case "price_asc":
       return "Cena skipassa ↑";
     default:
@@ -161,7 +159,6 @@ function sortLabel(k: SortKey) {
   }
 }
 
-/* ✅ slug do URL (slug--id) */
 function slugifyPL(input: string) {
   return input
     .toLowerCase()
@@ -172,18 +169,35 @@ function slugifyPL(input: string) {
     .replace(/(^-+|-+$)/g, "");
 }
 
-function resortSlug(r: { name?: string | null; city?: string | null; region?: string | null }) {
-  const parts = [r.name, r.city, r.region].filter((x) => x && String(x).trim().length) as string[];
+function resortSlug(r: { name?: string | null; city?: string | null; region?: string | null; country?: string | null }) {
+  const parts = [r.name, r.city, r.region, r.country].filter((x) => x && String(x).trim().length) as string[];
   const base = parts.join(" ");
   const slug = slugifyPL(base);
   return slug.length ? slug : "resort";
 }
 
+function resortPath(r: { id: any; name?: string | null; city?: string | null; region?: string | null; country?: string | null }) {
+  return `/resort/${resortSlug(r)}--${r.id}`;
+}
+
+function normKey(s: any) {
+  return String(s ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function tsMs(x?: string | null) {
+  if (!x) return 0;
+  const t = new Date(x).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
 /* ===================== COMPONENT ===================== */
 
 export default function HomeClient() {
+  const router = useRouter();
   const params = useSearchParams();
-  const forcedView = (params.get("view") ?? "").toLowerCase(); // "cards" | "table" | ""
+  const forcedView = (params.get("view") ?? "").toLowerCase();
   const forceCards = forcedView === "cards";
   const forceTable = forcedView === "table";
 
@@ -193,71 +207,85 @@ export default function HomeClient() {
 
   const [globalStatsUpdatedAt, setGlobalStatsUpdatedAt] = useState<string | null>(null);
 
-  // ✅ kafelki globalne (dla wszystkich resortów spełniających filtry)
   const [tiles, setTiles] = useState<{ open: number; closed: number }>({ open: 0, closed: 0 });
 
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"all" | "open" | "closed">("all");
+  const [sortKey, setSortKey] = useState<SortKey>("open_km_desc");
+
   const [difficulty, setDifficulty] = useState<DifficultyFilter>("all");
-
-  // ✅ filtr - tylko resorty z otwartą taśmą
   const [kidsTapeOnly, setKidsTapeOnly] = useState(false);
-
-  // ✅ NOWY filtr: minimalna liczba otwartych km (po stronie klienta)
   const [minOpenKm, setMinOpenKm] = useState<number>(0);
 
-  // ✅ sortowanie (SQL)
-  const [sortKey, setSortKey] = useState<SortKey>("open_km_desc");
+  const [regionFilter, setRegionFilter] = useState<RegionFilter>("all");
+  const [countryFilter, setCountryFilter] = useState<CountryFilter>("all");
 
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // ===== Mobile bottom sheet (draft state) =====
+  // sheet
   const [filtersOpen, setFiltersOpen] = useState(false);
-
-  const [dStatus, setDStatus] = useState<"all" | "open" | "closed">("all");
   const [dDifficulty, setDDifficulty] = useState<DifficultyFilter>("all");
   const [dKidsTapeOnly, setDKidsTapeOnly] = useState(false);
   const [dMinOpenKm, setDMinOpenKm] = useState<number>(0);
-  const [dSortKey, setDSortKey] = useState<SortKey>("open_km_desc");
+  const [dRegion, setDRegion] = useState<RegionFilter>("all");
+  const [dCountry, setDCountry] = useState<CountryFilter>("all");
 
   function openFilters() {
-    // sync draft from current
-    setDStatus(status);
     setDDifficulty(difficulty);
     setDKidsTapeOnly(kidsTapeOnly);
     setDMinOpenKm(minOpenKm);
-    setDSortKey(sortKey);
+    setDRegion(regionFilter);
+    setDCountry(countryFilter);
     setFiltersOpen(true);
   }
 
   function applyFilters() {
-    setStatus(dStatus);
     setDifficulty(dDifficulty);
     setKidsTapeOnly(dKidsTapeOnly);
     setMinOpenKm(dMinOpenKm);
-    setSortKey(dSortKey);
+    setRegionFilter(dRegion);
+    setCountryFilter(dCountry);
     setFiltersOpen(false);
   }
 
   function resetDraft() {
-    setDStatus("all");
     setDDifficulty("all");
     setDKidsTapeOnly(false);
     setDMinOpenKm(0);
-    setDSortKey("open_km_desc");
+    setDRegion("all");
+    setDCountry("all");
   }
 
   const activeFiltersCount = useMemo(() => {
     let c = 0;
     if (q.trim().length) c += 1;
-    if (status !== "all") c += 1;
     if (difficulty !== "all") c += 1;
     if (kidsTapeOnly) c += 1;
     if (minOpenKm > 0) c += 1;
-    // sort nie liczę jako filtr (to preferencja)
+    if (regionFilter !== "all") c += 1;
+    if (countryFilter !== "all") c += 1;
     return c;
-  }, [q, status, difficulty, kidsTapeOnly, minOpenKm]);
+  }, [q, difficulty, kidsTapeOnly, minOpenKm, regionFilter, countryFilter]);
+
+  const regionOptions = useMemo(() => {
+    const set = new Map<string, string>();
+    for (const r of rows) {
+      const v = (r.region ?? "").trim();
+      if (!v) continue;
+      set.set(normKey(v), v);
+    }
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b, "pl"));
+  }, [rows]);
+
+  const countryOptions = useMemo(() => {
+    const set = new Map<string, string>();
+    for (const r of rows) {
+      const v = (r.country ?? "").trim();
+      if (!v) continue;
+      set.set(normKey(v), v);
+    }
+    return Array.from(set.values()).sort((a, b) => a.localeCompare(b, "pl"));
+  }, [rows]);
 
   async function loadGlobalStatsUpdatedAt() {
     const { data, error } = await supabase
@@ -276,7 +304,6 @@ export default function HomeClient() {
     setGlobalStatsUpdatedAt((data as any)?.[0]?.stats_updated_at ?? null);
   }
 
-  // ✅ globalne liczniki otwarte/zamknięte (nie zależą od paginacji)
   async function loadTiles() {
     const { data, error } = await supabase.rpc("resorts_public_counts", {
       p_q: q.trim().length ? q.trim() : null,
@@ -303,9 +330,10 @@ export default function HomeClient() {
 
     const offset = (page - 1) * PAGE_SIZE;
 
-    const { data, error } = await supabase.rpc("resorts_public_list_search", {
+    // ✅ Zostawiamy RPC jak było – zakładamy że zwraca resort_updated_at (najświeższa zmiana z DB)
+    const { data, error } = await supabase.rpc("resorts_public_list_search_v2", {
       p_q: q.trim().length ? q.trim() : null,
-      p_status: status,
+      p_status: "all",
       p_difficulty: difficulty,
       p_kids_tape: kidsTapeOnly ? true : null,
       p_sort: sortKey,
@@ -322,19 +350,34 @@ export default function HomeClient() {
     }
 
     const list = ((data ?? []) as any) as ResortRow[];
-    const tc = (data as any)?.[0]?.total_count ?? 0;
-    setTotalCount(Number(tc) || 0);
 
-    setRows(list);
+    // ✅ dedupe po id i bierz najświeższy resort_updated_at
+    const byId = new Map<string, ResortRow>();
+    for (const r of list) {
+      const key = String(r.id);
+      const prev = byId.get(key);
+
+      const tNew = r.resort_updated_at ? new Date(r.resort_updated_at).getTime() : 0;
+      const tPrev = prev?.resort_updated_at ? new Date(prev.resort_updated_at).getTime() : 0;
+
+      if (!prev || tNew > tPrev) byId.set(key, r);
+    }
+    const deduped = Array.from(byId.values());
+
+    // total_count z RPC może liczyć “przed dedupe”, ale UI ma pokazać realną liczbę rekordów na stronie:
+    const tc = (data as any)?.[0]?.total_count ?? deduped.length;
+
+    setTotalCount(Number(tc) || deduped.length);
+    setRows(deduped);
     setLoading(false);
   }
 
-  useEffect(() => setPage(1), [q, status, difficulty, kidsTapeOnly, sortKey, minOpenKm]);
+  useEffect(() => setPage(1), [q, difficulty, kidsTapeOnly, sortKey, minOpenKm, regionFilter, countryFilter]);
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, q, status, difficulty, kidsTapeOnly, sortKey]);
+  }, [page, q, difficulty, kidsTapeOnly, sortKey]);
 
   useEffect(() => {
     loadGlobalStatsUpdatedAt();
@@ -345,17 +388,36 @@ export default function HomeClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, difficulty, kidsTapeOnly]);
 
+  // ✅ Aktualizacja: bierzemy NAJNOWSZY timestamp z resort_updated_at (i już niczego nie fallbackujemy)
+  const resortUpdateTs = (r: ResortRow) => r.resort_updated_at ?? null;
+
   const filteredRows = useMemo(() => {
     const thr = Number.isFinite(minOpenKm) ? minOpenKm : 0;
-    if (!thr || thr <= 0) return rows;
-    return rows.filter((r) => n0(r.open_km) > thr);
-  }, [rows, minOpenKm]);
+
+    let out = !thr || thr <= 0 ? rows : rows.filter((r) => n0(r.open_km) > thr);
+
+    if (regionFilter !== "all") {
+      const key = normKey(regionFilter);
+      out = out.filter((r) => normKey(r.region) === key);
+    }
+
+    if (countryFilter !== "all") {
+      const key = normKey(countryFilter);
+      out = out.filter((r) => normKey(r.country) === key);
+    }
+
+    // ✅ sort: updated_desc = po resort_updated_at (najnowsza zmiana w resort/wyciąg/trasa)
+    if (sortKey === "updated_desc") {
+      out = [...out].sort((a, b) => tsMs(resortUpdateTs(b)) - tsMs(resortUpdateTs(a)));
+    }
+
+    return out;
+  }, [rows, minOpenKm, sortKey, regionFilter, countryFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
     <div style={{ minHeight: "100vh", background: "#ffffff", fontFamily: "system-ui, Arial" }}>
-      {/* ✅ banner aligned to content width */}
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 20px 0" }}>
         <ContentBanner globalStatsUpdatedAt={globalStatsUpdatedAt} />
       </div>
@@ -366,355 +428,50 @@ export default function HomeClient() {
           <Tile title="Zamknięte" value={tiles.closed} />
         </div>
 
-        {/* ===================== DESKTOP FILTERS (as before) ===================== */}
-        <div className={forceCards ? "hide" : "desktopOnly"}>
-          <div className="filtersGrid">
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Szukaj</label>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="np. Białka, Szczyrk, Małopolska…"
-                style={inputStyle}
-              />
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Szuka po: nazwie, mieście i regionie.</div>
+        {/* ===================== TOP BAR ===================== */}
+        <div className="topBar">
+          <div className="topBarLeft">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Szukaj (np. Białka, Szczyrk, Małopolska, Polska)…"
+              style={{ ...inputStyle, height: 44 }}
+            />
 
-              <label style={checkboxRowStyle}>
-                <input
-                  type="checkbox"
-                  checked={kidsTapeOnly}
-                  onChange={(e) => setKidsTapeOnly(e.target.checked)}
-                  style={{ width: 16, height: 16 }}
-                />
-                Tylko z otwartą taśmą dla dzieci
-              </label>
-
-              <div style={{ marginTop: 10 }}>
-                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
-                  Min. otwarte km (więcej niż)
-                </label>
-
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step={0.5}
-                    value={Number.isFinite(minOpenKm) ? minOpenKm : 0}
-                    onChange={(e) => {
-                      const v = Number(String(e.target.value).replace(",", "."));
-                      setMinOpenKm(Number.isFinite(v) ? Math.max(0, v) : 0);
-                    }}
-                    style={inputStyle}
-                    placeholder="np. 10"
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => setMinOpenKm(0)}
-                    disabled={minOpenKm <= 0}
-                    style={btnStyle(minOpenKm <= 0)}
-                    title="Wyczyść filtr otwartych km"
-                  >
-                    Reset
-                  </button>
-                </div>
-
-                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                  Filtr działa lokalnie (na wynikach z bieżącej strony) i pokazuje resorty, które mają{" "}
-                  <b style={{ color: "#64748b" }}>więcej</b> niż podana liczba km.
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Status</label>
-              <select value={status} onChange={(e) => setStatus(e.target.value as any)} style={selectStyle}>
-                <option value="all">Wszystkie</option>
-                <option value="open">Otwarte</option>
-                <option value="closed">Zamknięte</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>
-                Kolor / trudność
-              </label>
-              <select value={difficulty} onChange={(e) => setDifficulty(e.target.value as any)} style={selectStyle}>
-                <option value="all">Wszystkie</option>
-                <option value="green">Zielone / łatwe</option>
-                <option value="blue">Niebieskie / średnie</option>
-                <option value="red">Czerwone / trudne</option>
-                <option value="black">Czarne / bardzo trudne</option>
-              </select>
-
-              {difficulty !== "all" ? (
-                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                  Trasy + otwarte km liczone tylko dla:{" "}
-                  <b style={{ color: "#64748b" }}>{difficultyLabel(difficulty)}</b>
-                </div>
-              ) : (
-                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                  Trasy + otwarte km liczone dla wszystkich tras.
-                </div>
-              )}
-
-              <div style={{ marginTop: 10 }}>
-                <label style={{ display: "block", fontSize: 12, color: "#64748b", marginBottom: 6 }}>Sortowanie</label>
-                <select
-                  value={sortKey}
-                  onChange={(e) => setSortKey(e.target.value as SortKey)}
-                  style={selectStyle}
-                >
-                  <option value="open_km_desc">Otwarte km ↓</option>
-                  <option value="comfort_desc">Komfort (PPH / km) ↓</option>
-                  <option value="pph_desc">Przepustowość (PPH) ↓</option>
-                  <option value="updated_desc">Najnowsza aktualizacja ↓</option>
-                  <option value="price_asc">Cena skipassa ↑</option>
-                </select>
-
-                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                  Komfort = przepustowość otwarta / otwarte km (wyżej = zwykle mniej tłoczno).
-                </div>
-
-                <div style={{ marginTop: 10, fontSize: 11, color: "#94a3b8", lineHeight: 1.35 }}>
-                  Podgląd widoku:{" "}
-                  <a
-                    href="/?view=cards"
-                    style={{ color: "#0f172a", fontWeight: 800, textDecoration: "underline", textUnderlineOffset: 3 }}
-                  >
-                    ?view=cards
-                  </a>{" "}
-                  /{" "}
-                  <a
-                    href="/?view=table"
-                    style={{ color: "#0f172a", fontWeight: 800, textDecoration: "underline", textUnderlineOffset: 3 }}
-                  >
-                    ?view=table
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ===================== MOBILE TOP BAR + BOTTOM SHEET FILTERS ===================== */}
-        <div className={forceCards ? "forceShow" : "mobileOnly"}>
-          <div className="mobileTopBar">
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Szukaj…"
-                style={{
-                  ...inputStyle,
-                  height: 44,
-                  padding: "10px 12px",
-                }}
-              />
-              <button
-                type="button"
-                onClick={openFilters}
-                style={{
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #e2e8f0",
-                  background: "#ffffff",
-                  color: "#0f172a",
-                  fontWeight: 900,
-                  padding: "0 12px",
-                  whiteSpace: "nowrap",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-                aria-label="Filtry"
-              >
-                Filtry
-                {activeFiltersCount > 0 ? (
-                  <span
-                    style={{
-                      minWidth: 22,
-                      height: 22,
-                      borderRadius: 999,
-                      background: "#0f172a",
-                      color: "#ffffff",
-                      fontSize: 12,
-                      fontWeight: 900,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: "0 6px",
-                    }}
-                  >
-                    {activeFiltersCount}
-                  </span>
-                ) : null}
-              </button>
-            </div>
-
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 10 }}>
-              <select
-                value={sortKey}
-                onChange={(e) => setSortKey(e.target.value as SortKey)}
-                style={{ ...selectStyle, height: 44 }}
-                aria-label="Sortowanie"
-              >
-                <option value="open_km_desc">Otwarte km ↓</option>
-                <option value="comfort_desc">Komfort ↓</option>
-                <option value="pph_desc">PPH ↓</option>
-                <option value="updated_desc">Aktualizacja ↓</option>
-                <option value="price_asc">Cena ↑</option>
-              </select>
-
-              <button
-                type="button"
-                onClick={() => setKidsTapeOnly((v) => !v)}
-                style={{
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #e2e8f0",
-                  background: kidsTapeOnly ? "#0f172a" : "#ffffff",
-                  color: kidsTapeOnly ? "#ffffff" : "#0f172a",
-                  fontWeight: 900,
-                  padding: "0 12px",
-                  whiteSpace: "nowrap",
-                }}
-                aria-pressed={kidsTapeOnly}
-              >
-                Taśma 👶
-              </button>
-            </div>
+            <button type="button" onClick={openFilters} style={pillBtnStyle(false)} aria-label="Filtry">
+              Filtry
+              {activeFiltersCount > 0 ? <span style={badgeStyle}>{activeFiltersCount}</span> : null}
+            </button>
           </div>
 
-          <BottomSheet
-            open={filtersOpen}
-            title="Filtry"
-            onClose={() => setFiltersOpen(false)}
-            footer={
-              <div style={{ display: "flex", gap: 10 }}>
-                <button
-                  type="button"
-                  onClick={resetDraft}
-                  style={{
-                    flex: 1,
-                    height: 46,
-                    borderRadius: 14,
-                    border: "1px solid #e2e8f0",
-                    background: "#ffffff",
-                    color: "#0f172a",
-                    fontWeight: 900,
-                  }}
-                >
-                  Wyczyść
-                </button>
-                <button
-                  type="button"
-                  onClick={applyFilters}
-                  style={{
-                    flex: 1,
-                    height: 46,
-                    borderRadius: 14,
-                    border: "1px solid #0f172a",
-                    background: "#0f172a",
-                    color: "#ffffff",
-                    fontWeight: 900,
-                  }}
-                >
-                  Zastosuj
-                </button>
-              </div>
-            }
-          >
-            <div style={{ display: "grid", gap: 12 }}>
-              <div>
-                <label style={labelStyle}>Status</label>
-                <select value={dStatus} onChange={(e) => setDStatus(e.target.value as any)} style={selectStyle}>
-                  <option value="all">Wszystkie</option>
-                  <option value="open">Otwarte</option>
-                  <option value="closed">Zamknięte</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Kolor / trudność</label>
-                <select value={dDifficulty} onChange={(e) => setDDifficulty(e.target.value as any)} style={selectStyle}>
-                  <option value="all">Wszystkie</option>
-                  <option value="green">Zielone / łatwe</option>
-                  <option value="blue">Niebieskie / średnie</option>
-                  <option value="red">Czerwone / trudne</option>
-                  <option value="black">Czarne / bardzo trudne</option>
-                </select>
-                <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                  {dDifficulty !== "all"
-                    ? `Trasy + km tylko dla: ${difficultyLabel(dDifficulty)}`
-                    : "Trasy + km dla wszystkich tras."}
-                </div>
-              </div>
-
-              <div>
-                <label style={labelStyle}>Min. otwarte km (więcej niż)</label>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    step={0.5}
-                    value={Number.isFinite(dMinOpenKm) ? dMinOpenKm : 0}
-                    onChange={(e) => {
-                      const v = Number(String(e.target.value).replace(",", "."));
-                      setDMinOpenKm(Number.isFinite(v) ? Math.max(0, v) : 0);
-                    }}
-                    style={inputStyle}
-                    placeholder="np. 10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setDMinOpenKm(0)}
-                    disabled={dMinOpenKm <= 0}
-                    style={{
-                      height: 44,
-                      borderRadius: 12,
-                      border: "1px solid #e2e8f0",
-                      background: dMinOpenKm <= 0 ? "#f8fafc" : "#ffffff",
-                      color: dMinOpenKm <= 0 ? "#94a3b8" : "#0f172a",
-                      cursor: dMinOpenKm <= 0 ? "not-allowed" : "pointer",
-                      fontWeight: 900,
-                      padding: "0 12px",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    Reset
-                  </button>
-                </div>
-              </div>
-
-              <label style={checkboxRowStyle}>
-                <input
-                  type="checkbox"
-                  checked={dKidsTapeOnly}
-                  onChange={(e) => setDKidsTapeOnly(e.target.checked)}
-                  style={{ width: 18, height: 18 }}
-                />
-                Tylko z otwartą taśmą dla dzieci
-              </label>
-
-              <div>
-                <label style={labelStyle}>Sortowanie</label>
-                <select value={dSortKey} onChange={(e) => setDSortKey(e.target.value as SortKey)} style={selectStyle}>
-                  <option value="open_km_desc">Otwarte km ↓</option>
-                  <option value="comfort_desc">Komfort (PPH / km) ↓</option>
-                  <option value="pph_desc">Przepustowość (PPH) ↓</option>
-                  <option value="updated_desc">Najnowsza aktualizacja ↓</option>
-                  <option value="price_asc">Cena skipassa ↑</option>
-                </select>
-              </div>
-            </div>
-          </BottomSheet>
+          <div className="topBarRight">
+            <label style={{ fontSize: 12, color: "#64748b", fontWeight: 700, whiteSpace: "nowrap" }}>Sortuj</label>
+            <select
+              value={sortKey}
+              onChange={(e) => setSortKey(e.target.value as SortKey)}
+              style={{ ...selectStyle, height: 44, width: 220 }}
+              aria-label="Sortowanie"
+            >
+              <option value="open_km_desc">Otwarte km ↓</option>
+              <option value="comfort_desc">Komfort (PPH / km) ↓</option>
+              <option value="pph_desc">Przepustowość (PPH) ↓</option>
+              <option value="updated_desc">Aktualizacja ↓</option>
+              <option value="price_asc">Cena skipassa ↑</option>
+            </select>
+          </div>
         </div>
 
         {/* ===================== INFO ROW ===================== */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap", marginTop: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginBottom: 10,
+            flexWrap: "wrap",
+            marginTop: 12,
+          }}
+        >
           <div style={{ color: "#64748b", fontSize: 12 }}>
             Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona{" "}
             <b style={{ color: "#0f172a" }}>{page}</b> / <b style={{ color: "#0f172a" }}>{totalPages}</b>
@@ -724,6 +481,8 @@ export default function HomeClient() {
             </span>
             {kidsTapeOnly ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• taśma dla dzieci</span> : null}
             {minOpenKm > 0 ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• open_km &gt; {minOpenKm}</span> : null}
+            {regionFilter !== "all" ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• region: {regionFilter}</span> : null}
+            {countryFilter !== "all" ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• kraj: {countryFilter}</span> : null}
           </div>
           {loading && <span style={{ color: "#475569", fontSize: 12 }}>Ładowanie…</span>}
           {error && <span style={{ color: "#dc2626", fontSize: 12 }}>Błąd: {error}</span>}
@@ -731,7 +490,12 @@ export default function HomeClient() {
 
         {/* ===================== CARDS (mobile + force) ===================== */}
         <div className={forceCards ? "forceShow" : forceTable ? "hide" : "mobileOnly"}>
-          <ResortCards rows={filteredRows} loading={loading} />
+          <ResortCards
+            rows={filteredRows}
+            loading={loading}
+            onOpenResort={(r) => router.push(resortPath(r))}
+            resortUpdateTs={resortUpdateTs}
+          />
         </div>
 
         {/* ===================== TABLE (desktop + force) ===================== */}
@@ -741,22 +505,23 @@ export default function HomeClient() {
               <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
                 <thead style={{ background: "#fafcff" }}>
                   <tr>
-                    <Th style={{ width: 190 }}>Resort</Th>
+                    <Th style={{ width: 210 }}>Resort</Th>
                     <Th style={{ width: 95 }}>Status</Th>
                     <Th style={{ width: 85 }}>Trasy</Th>
                     <Th style={{ width: 95 }}>Otwarte km</Th>
-                    <Th style={{ width: 120 }}>Skipass</Th>
+                    <Th style={{ width: 140 }}>Skipass</Th>
                     <Th style={{ width: 90 }}>Wyciągi</Th>
                     <Th style={{ width: 130 }}>Przepustowość</Th>
-                    <Th style={{ width: 90 }}>Akt.</Th>
-                    <Th style={{ width: 60 }}>Link</Th>
+
+                    {/* ✅ ostatnia kolumna: Aktualizacja + CTA w jednym wierszu */}
+                    <Th style={{ width: 150 }}>Aktualizacja</Th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {filteredRows.length === 0 && !loading ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: 14, color: "#64748b", fontSize: 13 }}>
+                      <td colSpan={8} style={{ padding: 14, color: "#64748b", fontSize: 13 }}>
                         Brak wyników dla wybranych filtrów.
                       </td>
                     </tr>
@@ -777,31 +542,26 @@ export default function HomeClient() {
                       const price = Number(r.skipass_price ?? 0);
                       const cur = (r.skipass_currency ?? "PLN").toUpperCase();
 
-                      const sublineParts = [r.city, r.region].filter((x) => !!(x && String(x).trim().length > 0)) as string[];
+                      const sublineParts = [r.city, r.region, r.country].filter(
+                        (x) => !!(x && String(x).trim().length > 0)
+                      ) as string[];
                       const subline = sublineParts.length > 0 ? sublineParts.join(" • ") : null;
 
-                      return (
-                        <tr key={(r.id as any) ?? idx} style={{ borderTop: "1px solid #f1f5f9" }}>
-                          <Td style={{ whiteSpace: "normal" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-                              <div
-                                style={{
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  minWidth: 0,
-                                }}
-                                title={r.name ?? "—"}
-                              >
-                                <Link
-                                  href={`/resort/${resortSlug(r)}--${r.id}`}
-                                  style={{ fontWeight: 800, color: "#0f172a", textDecoration: "none" }}
-                                >
-                                  {r.name ?? "—"}
-                                </Link>
-                              </div>
-                            </div>
+                      const upd = resortUpdateTs(r);
 
+                      return (
+                        <tr
+                          key={(r.id as any) ?? idx}
+                          className="rowLink"
+                          onClick={() => router.push(resortPath(r))}
+                          role="link"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") router.push(resortPath(r));
+                          }}
+                        >
+                          <Td style={{ whiteSpace: "normal" }}>
+                            <div style={{ fontWeight: 900, color: "#0f172a", lineHeight: 1.2 }}>{r.name ?? "—"}</div>
                             {subline ? (
                               <div
                                 style={{
@@ -832,26 +592,7 @@ export default function HomeClient() {
                           <Td style={{ textAlign: "left" }}>
                             {hasPrice ? (
                               <>
-                                {r.skipass_url ? (
-                                  <a
-                                    href={r.skipass_url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style={{
-                                      color: "#0f172a",
-                                      textDecoration: "underline",
-                                      textUnderlineOffset: 3,
-                                      fontWeight: 400,
-                                      whiteSpace: "nowrap",
-                                    }}
-                                    title="Cennik skipassa"
-                                  >
-                                    {fmtMoney(price, cur)}
-                                  </a>
-                                ) : (
-                                  <span style={{ fontWeight: 400, whiteSpace: "nowrap" }}>{fmtMoney(price, cur)}</span>
-                                )}
-
+                                <span style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{fmtMoney(price, cur)}</span>
                                 {r.skipass_label ? (
                                   <div
                                     style={{
@@ -877,35 +618,26 @@ export default function HomeClient() {
                           <Td style={{ textAlign: "left" }}>{`${liftsOpen} / ${liftsTotal}`}</Td>
 
                           <Td style={{ textAlign: "left" }}>
-                            {pphOpen > 0 ? (
-                              <span style={{ fontWeight: 400, whiteSpace: "nowrap" }}>{fmtPPH(pphOpen)}</span>
-                            ) : (
-                              <span style={{ color: "#94a3b8" }}>—</span>
-                            )}
+                            {pphOpen > 0 ? fmtPPH(pphOpen) : <span style={{ color: "#94a3b8" }}>—</span>}
                           </Td>
 
-                          <Td style={{ textAlign: "left" }} title={fmtDate(r.last_checked_at)}>
-                            {fmtDateShort(r.last_checked_at)}
-                          </Td>
+                          {/* ✅ Aktualizacja (resort_updated_at) + delikatny link-button po prawej */}
+                          <Td style={{ textAlign: "left" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                              <span title={upd ? fmtDate(upd) : "Brak aktualizacji"}>{upd ? fmtDateShort(upd) : "—"}</span>
 
-                          <Td>
-                            {r.url ? (
-                              <a
-                                href={r.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={{
-                                  color: "#0f172a",
-                                  textDecoration: "underline",
-                                  textUnderlineOffset: 3,
-                                  fontWeight: 650,
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(resortPath(r));
                                 }}
+                                style={ctaLinkBtnStyle}
+                                aria-label={`Zobacz ${r.name ?? "resort"}`}
                               >
-                                strona
-                              </a>
-                            ) : (
-                              "—"
-                            )}
+                                Zobacz →
+                              </button>
+                            </div>
                           </Td>
                         </tr>
                       );
@@ -936,12 +668,9 @@ export default function HomeClient() {
               </button>
 
               <div style={{ color: "#64748b", fontSize: 12 }}>
-                {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z{" "}
-                {totalCount}
+                {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z {totalCount}
                 {minOpenKm > 0 ? (
-                  <span style={{ marginLeft: 8, color: "#94a3b8" }}>
-                    • po filtrze open_km: {filteredRows.length} na tej stronie
-                  </span>
+                  <span style={{ marginLeft: 8, color: "#94a3b8" }}>• po filtrze open_km: {filteredRows.length} na tej stronie</span>
                 ) : null}
               </div>
 
@@ -980,8 +709,7 @@ export default function HomeClient() {
             </button>
 
             <div style={{ color: "#64748b", fontSize: 12 }}>
-              {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z{" "}
-              {totalCount}
+              {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z {totalCount}
             </div>
 
             <button
@@ -1012,6 +740,145 @@ export default function HomeClient() {
           </a>
         </div>
 
+        {/* ===================== FILTER SHEET ===================== */}
+        <BottomSheet
+          open={filtersOpen}
+          title="Filtry"
+          onClose={() => setFiltersOpen(false)}
+          footer={
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                type="button"
+                onClick={resetDraft}
+                style={{
+                  flex: 1,
+                  height: 46,
+                  borderRadius: 14,
+                  border: "1px solid #e2e8f0",
+                  background: "#ffffff",
+                  color: "#0f172a",
+                  fontWeight: 900,
+                }}
+              >
+                Wyczyść
+              </button>
+              <button
+                type="button"
+                onClick={applyFilters}
+                style={{
+                  flex: 1,
+                  height: 46,
+                  borderRadius: 14,
+                  border: "1px solid #0f172a",
+                  background: "#0f172a",
+                  color: "#ffffff",
+                  fontWeight: 900,
+                }}
+              >
+                Zastosuj
+              </button>
+            </div>
+          }
+        >
+          <div style={{ display: "grid", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Region</label>
+              <select value={dRegion} onChange={(e) => setDRegion(e.target.value)} style={selectStyle}>
+                <option value="all">Wszystkie</option>
+                {regionOptions.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                Filtr działa lokalnie (na bieżącej stronie wyników).
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Kraj</label>
+              <select value={dCountry} onChange={(e) => setDCountry(e.target.value)} style={selectStyle}>
+                <option value="all">Wszystkie</option>
+                {countryOptions.map((x) => (
+                  <option key={x} value={x}>
+                    {x}
+                  </option>
+                ))}
+              </select>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                Filtr działa lokalnie (na bieżącej stronie wyników).
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Kolor / trudność</label>
+              <select value={dDifficulty} onChange={(e) => setDDifficulty(e.target.value as any)} style={selectStyle}>
+                <option value="all">Wszystkie</option>
+                <option value="green">Zielone / łatwe</option>
+                <option value="blue">Niebieskie / średnie</option>
+                <option value="red">Czerwone / trudne</option>
+                <option value="black">Czarne / bardzo trudne</option>
+              </select>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                {dDifficulty !== "all" ? `Trasy + km tylko dla: ${difficultyLabel(dDifficulty)}` : "Trasy + km dla wszystkich tras."}
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Min. otwarte km (więcej niż)</label>
+              <div style={{ display: "flex", gap: 10 }}>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step={0.5}
+                  value={Number.isFinite(dMinOpenKm) ? dMinOpenKm : 0}
+                  onChange={(e) => {
+                    const v = Number(String(e.target.value).replace(",", "."));
+                    setDMinOpenKm(Number.isFinite(v) ? Math.max(0, v) : 0);
+                  }}
+                  style={inputStyle}
+                  placeholder="np. 10"
+                />
+                <button type="button" onClick={() => setDMinOpenKm(0)} disabled={dMinOpenKm <= 0} style={btnStyle(dMinOpenKm <= 0)}>
+                  Reset
+                </button>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+                Filtr działa lokalnie (na bieżącej stronie wyników).
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Dzieci</label>
+              <button
+                type="button"
+                onClick={() => setDKidsTapeOnly((v) => !v)}
+                style={{
+                  height: 44,
+                  borderRadius: 12,
+                  border: "1px solid #e2e8f0",
+                  background: dKidsTapeOnly ? "#0f172a" : "#ffffff",
+                  color: dKidsTapeOnly ? "#ffffff" : "#0f172a",
+                  fontWeight: 900,
+                  padding: "0 12px",
+                  whiteSpace: "nowrap",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  width: "fit-content",
+                }}
+                aria-pressed={dKidsTapeOnly}
+              >
+                Taśma dla dzieci 👶 {dKidsTapeOnly ? "✓" : ""}
+              </button>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Pokaż tylko resorty z otwartą taśmą dla dzieci.</div>
+            </div>
+          </div>
+        </BottomSheet>
+
         <style jsx>{`
           .tilesGrid {
             display: grid;
@@ -1019,17 +886,6 @@ export default function HomeClient() {
             gap: 10px;
             margin-top: 14px;
             margin-bottom: 14px;
-          }
-
-          .filtersGrid {
-            display: grid;
-            grid-template-columns: 2fr 1fr 1fr;
-            gap: 10px;
-            padding: 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 14px;
-            margin-bottom: 12px;
-            background: #ffffff;
           }
 
           .desktopOnly {
@@ -1042,7 +898,6 @@ export default function HomeClient() {
             display: none;
           }
 
-          /* 🔑 wymuszenia widoku */
           .forceShow {
             display: block;
           }
@@ -1050,8 +905,7 @@ export default function HomeClient() {
             display: block;
           }
 
-          /* mobile top bar */
-          .mobileTopBar {
+          .topBar {
             position: sticky;
             top: 0;
             z-index: 30;
@@ -1061,14 +915,49 @@ export default function HomeClient() {
             border-radius: 16px;
             padding: 12px;
             margin-bottom: 12px;
+
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: space-between;
+          }
+
+          .topBarLeft {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex: 1;
+            min-width: 0;
+          }
+
+          .topBarLeft :global(input) {
+            flex: 1;
+            min-width: 0;
+          }
+
+          .topBarRight {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            justify-content: flex-end;
+            white-space: nowrap;
+          }
+
+          /* ✅ hover na wierszach tabeli */
+          :global(tr.rowLink) {
+            cursor: pointer;
+            transition: background 120ms ease;
+          }
+          :global(tr.rowLink:hover) {
+            background: #f8fafc;
+          }
+          :global(tr.rowLink:focus-visible) {
+            outline: 2px solid #0f172a;
+            outline-offset: -2px;
           }
 
           @media (max-width: 820px) {
             .tilesGrid {
-              grid-template-columns: 1fr;
-            }
-
-            .filtersGrid {
               grid-template-columns: 1fr;
             }
 
@@ -1078,6 +967,19 @@ export default function HomeClient() {
             .mobileOnly {
               display: block;
             }
+
+            .topBar {
+              flex-direction: column;
+              align-items: stretch;
+            }
+
+            .topBarRight {
+              justify-content: space-between;
+            }
+
+            .topBarRight :global(select) {
+              width: 100% !important;
+            }
           }
         `}</style>
       </main>
@@ -1085,37 +987,18 @@ export default function HomeClient() {
   );
 }
 
-/* ===================== BANNER (CONTENT WIDTH) ===================== */
+/* ===================== BANNER ===================== */
 
 function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string | null }) {
   return (
-    <div
-      style={{
-        border: "1px solid #e2e8f0",
-        borderRadius: 16,
-        overflow: "hidden",
-        background: "#fafcff",
-      }}
-    >
-<div
-  style={{
-    width: "100%",
-    aspectRatio: "1470 / 300", // ✅ proporcje logo
-    background: "#fafcff",
-  }}
->
-  <img
-    src="/baner.png"
-    alt="otwartestoki banner"
-    style={{
-      width: "100%",
-      height: "100%",
-      objectFit: "cover",
-      objectPosition: "center",
-      display: "block",
-    }}
-  />
-</div>
+    <div style={{ border: "1px solid #e2e8f0", borderRadius: 16, overflow: "hidden", background: "#fafcff" }}>
+      <div style={{ width: "100%", aspectRatio: "1470 / 300", background: "#fafcff" }}>
+        <img
+          src="/baner.png"
+          alt="otwartestoki banner"
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
+        />
+      </div>
       <div
         style={{
           display: "flex",
@@ -1128,7 +1011,7 @@ function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string 
           fontSize: 12,
         }}
       >
-        Globalna aktualizacja (statystyki): <b style={{ color: "#0f172a" }}>{fmtDate(globalStatsUpdatedAt)}</b>
+        Ostatnia aktualizacja: <b style={{ color: "#0f172a" }}>{fmtDate(globalStatsUpdatedAt)}</b>
       </div>
     </div>
   );
@@ -1149,7 +1032,6 @@ function BottomSheet({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
-  // zamykanie ESC
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -1159,7 +1041,6 @@ function BottomSheet({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  // blokuj scroll tła
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -1171,47 +1052,15 @@ function BottomSheet({
 
   return (
     <>
-      <div
-        className="bsOverlay"
-        style={{
-          opacity: open ? 1 : 0,
-          pointerEvents: open ? "auto" : "none",
-        }}
-        onClick={onClose}
-      />
+      <div className="bsOverlay" style={{ opacity: open ? 1 : 0, pointerEvents: open ? "auto" : "none" }} onClick={onClose} />
 
-      <div
-        className="bsPanel"
-        style={{
-          transform: open ? "translateY(0)" : "translateY(110%)",
-        }}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div
-          style={{
-            padding: 14,
-            borderBottom: "1px solid #e2e8f0",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: 10,
-          }}
-        >
+      <div className="bsPanel" style={{ transform: open ? "translateY(0)" : "translateY(110%)" }} role="dialog" aria-modal="true" aria-label={title}>
+        <div style={{ padding: 14, borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ fontWeight: 950, color: "#0f172a" }}>{title}</div>
           <button
             type="button"
             onClick={onClose}
-            style={{
-              border: "1px solid #e2e8f0",
-              background: "#ffffff",
-              borderRadius: 12,
-              height: 36,
-              padding: "0 12px",
-              fontWeight: 900,
-              color: "#0f172a",
-            }}
+            style={{ border: "1px solid #e2e8f0", background: "#ffffff", borderRadius: 12, height: 36, padding: "0 12px", fontWeight: 900, color: "#0f172a" }}
           >
             Zamknij
           </button>
@@ -1219,15 +1068,7 @@ function BottomSheet({
 
         <div style={{ padding: 14, overflowY: "auto", maxHeight: "calc(85vh - 70px - 76px)" }}>{children}</div>
 
-        <div
-          style={{
-            padding: 14,
-            borderTop: "1px solid #e2e8f0",
-            background: "#ffffff",
-          }}
-        >
-          {footer}
-        </div>
+        <div style={{ padding: 14, borderTop: "1px solid #e2e8f0", background: "#ffffff" }}>{footer}</div>
       </div>
 
       <style jsx>{`
@@ -1259,7 +1100,17 @@ function BottomSheet({
 
 /* ===================== MOBILE CARDS ===================== */
 
-function ResortCards({ rows, loading }: { rows: ResortRow[]; loading: boolean }) {
+function ResortCards({
+  rows,
+  loading,
+  onOpenResort,
+  resortUpdateTs,
+}: {
+  rows: ResortRow[];
+  loading: boolean;
+  onOpenResort: (r: ResortRow) => void;
+  resortUpdateTs: (r: ResortRow) => string | null;
+}) {
   if (rows.length === 0 && !loading) {
     return (
       <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, background: "#fff", padding: 14, color: "#64748b" }}>
@@ -1288,29 +1139,32 @@ function ResortCards({ rows, loading }: { rows: ResortRow[]; loading: boolean })
         const price = Number(r.skipass_price ?? 0);
         const cur = (r.skipass_currency ?? "PLN").toUpperCase();
 
-        const sublineParts = [r.city, r.region].filter((x) => !!(x && String(x).trim().length > 0)) as string[];
+        const sublineParts = [r.city, r.region, r.country].filter((x) => !!(x && String(x).trim().length > 0)) as string[];
         const subline = sublineParts.length > 0 ? sublineParts.join(" • ") : null;
+
+        const upd = resortUpdateTs(r);
 
         return (
           <div
             key={(r.id as any) ?? idx}
+            onClick={() => onOpenResort(r)}
+            role="link"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onOpenResort(r);
+            }}
             style={{
               border: "1px solid #e2e8f0",
               borderRadius: 16,
               background: "#ffffff",
               padding: 12,
               boxShadow: "0 1px 0 rgba(15,23,42,0.04)",
+              cursor: "pointer",
             }}
           >
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
               <div style={{ minWidth: 0 }}>
-                <Link
-                  href={`/resort/${resortSlug(r)}--${r.id}`}
-                  style={{ fontWeight: 900, color: "#0f172a", textDecoration: "none" }}
-                >
-                  {r.name ?? "—"}
-                </Link>
-
+                <div style={{ fontWeight: 950, color: "#0f172a" }}>{r.name ?? "—"}</div>
                 {subline ? (
                   <div
                     style={{
@@ -1342,27 +1196,15 @@ function ResortCards({ rows, loading }: { rows: ResortRow[]; loading: boolean })
               <MiniStat label="Przepustowość" value={pphOpen > 0 ? fmtPPH(pphOpen) : "—"} />
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginTop: 10, alignItems: "center" }}>
-              <div style={{ minWidth: 0 }}>
+            {/* ✅ ZMIANA: stabilny layout (Aktualizacja + Zobacz) na mobile */}
+            <div className="cardBottomRow">
+              <div className="skipassBlock">
                 <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Skipass</div>
                 {hasPrice ? (
-                  r.skipass_url ? (
-                    <a
-                      href={r.skipass_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: "#0f172a", textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 800 }}
-                      title="Cennik skipassa"
-                    >
-                      {fmtMoney(price, cur)}
-                    </a>
-                  ) : (
-                    <span style={{ fontWeight: 800, color: "#0f172a" }}>{fmtMoney(price, cur)}</span>
-                  )
+                  <span style={{ fontWeight: 800, color: "#0f172a" }}>{fmtMoney(price, cur)}</span>
                 ) : (
                   <span style={{ color: "#94a3b8" }}>—</span>
                 )}
-
                 {r.skipass_label ? (
                   <div
                     style={{
@@ -1380,53 +1222,95 @@ function ResortCards({ rows, loading }: { rows: ResortRow[]; loading: boolean })
                 ) : null}
               </div>
 
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Aktualizacja</div>
-                <div style={{ fontSize: 12, color: "#0f172a", fontWeight: 700 }} title={fmtDate(r.last_checked_at)}>
-                  {fmtDateShort(r.last_checked_at)}
+              <div className="updateBlock">
+                <div className="updateLabel">Aktualizacja</div>
+
+                <div className="updateRow">
+                  <div className="updateDate" title={upd ? fmtDate(upd) : "Brak aktualizacji"}>
+                    {upd ? fmtDateShort(upd) : "—"}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="updateBtn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenResort(r);
+                    }}
+                    style={ctaLinkBtnStyle}
+                    aria-label={`Zobacz ${r.name ?? "resort"}`}
+                  >
+                    Zobacz →
+                  </button>
                 </div>
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-              <Link
-                href={`/resort/${resortSlug(r)}--${r.id}`}
-                style={{
-                  flex: 1,
-                  textAlign: "center",
-                  padding: "12px 12px",
-                  borderRadius: 14,
-                  border: "1px solid #e2e8f0",
-                  background: "#0f172a",
-                  color: "#ffffff",
-                  fontWeight: 900,
-                  textDecoration: "none",
-                }}
-              >
-                Szczegóły
-              </Link>
+            {/* ✅ lokalny CSS tylko dla kart */}
+            <style jsx>{`
+              .cardBottomRow {
+                display: flex;
+                justify-content: space-between;
+                gap: 10px;
+                margin-top: 10px;
+                align-items: flex-end;
+              }
 
-              <a
-                href={r.url ?? "#"}
-                target={r.url ? "_blank" : undefined}
-                rel={r.url ? "noreferrer" : undefined}
-                aria-disabled={!r.url}
-                style={{
-                  flex: 1,
-                  textAlign: "center",
-                  padding: "12px 12px",
-                  borderRadius: 14,
-                  border: "1px solid #e2e8f0",
-                  background: r.url ? "#ffffff" : "#f8fafc",
-                  color: r.url ? "#0f172a" : "#94a3b8",
-                  fontWeight: 900,
-                  textDecoration: "none",
-                  pointerEvents: r.url ? "auto" : "none",
-                }}
-              >
-                Strona ośrodka
-              </a>
-            </div>
+              .skipassBlock {
+                flex: 1;
+                min-width: 0;
+              }
+
+              .updateBlock {
+                flex-shrink: 0;
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 4px;
+                min-width: 150px;
+              }
+
+              .updateLabel {
+                font-size: 11px;
+                color: #94a3b8;
+              }
+
+              .updateRow {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: nowrap;
+              }
+
+              .updateDate {
+                font-size: 12px;
+                color: #0f172a;
+                font-weight: 800;
+                white-space: nowrap;
+              }
+
+              .updateBtn {
+                flex-shrink: 0;
+              }
+
+              @media (max-width: 380px) {
+                .cardBottomRow {
+                  flex-direction: column;
+                  align-items: stretch;
+                }
+
+                .updateBlock {
+                  align-items: flex-start;
+                  min-width: 0;
+                  width: 100%;
+                }
+
+                .updateRow {
+                  width: 100%;
+                  justify-content: space-between;
+                }
+              }
+            `}</style>
           </div>
         );
       })}
@@ -1523,16 +1407,6 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 6,
 };
 
-const checkboxRowStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  marginTop: 10,
-  fontSize: 13,
-  color: "#0f172a",
-  userSelect: "none",
-};
-
 function pagerBtnStyle(disabled: boolean) {
   return {
     padding: "10px 12px",
@@ -1548,14 +1422,59 @@ function pagerBtnStyle(disabled: boolean) {
 
 function btnStyle(disabled: boolean) {
   return {
-    padding: "10px 12px",
+    height: 44,
+    padding: "0 12px",
     borderRadius: 12,
     border: "1px solid #e2e8f0",
     background: disabled ? "#f8fafc" : "#ffffff",
     color: disabled ? "#94a3b8" : "#0f172a",
     cursor: disabled ? "not-allowed" : "pointer",
-    fontWeight: 800,
+    fontWeight: 900,
     fontSize: 12,
     whiteSpace: "nowrap",
   } as const;
 }
+
+function pillBtnStyle(active: boolean) {
+  return {
+    height: 44,
+    borderRadius: 12,
+    border: "1px solid #e2e8f0",
+    background: active ? "#0f172a" : "#ffffff",
+    color: active ? "#ffffff" : "#0f172a",
+    fontWeight: 950,
+    padding: "0 12px",
+    whiteSpace: "nowrap",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+  } as const;
+}
+
+const badgeStyle: React.CSSProperties = {
+  minWidth: 22,
+  height: 22,
+  borderRadius: 999,
+  background: "#0f172a",
+  color: "#ffffff",
+  fontSize: 12,
+  fontWeight: 900,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "0 6px",
+};
+
+// ✅ delikatny „link-button” zamiast ordynarnego CTA
+const ctaLinkBtnStyle: React.CSSProperties = {
+  border: "1px solid transparent",
+  background: "transparent",
+  padding: "4px 6px",
+  borderRadius: 10,
+  color: "#2563eb",
+  fontWeight: 900,
+  fontSize: 12,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  lineHeight: 1,
+};
