@@ -706,11 +706,7 @@ export default function ResortPage() {
   const headerSubline =
     [resort?.city, resort?.region, resort?.country].filter((x) => x && String(x).trim().length).join(" • ") || "—";
 
-  function openWebcam() {
-    const url = resort?.webcam_url?.trim();
-    if (!url) return;
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
+
 
   return (
     <div
