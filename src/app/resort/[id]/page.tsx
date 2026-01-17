@@ -354,6 +354,35 @@ export default function ResortPage() {
   const [liftsOpenUI, setLiftsOpenUI] = useState(false);
   const [skipassOpenUI, setSkipassOpenUI] = useState(false);
 
+  // === scroll-to sections (kafelki Trasy/Wyciągi) ===
+  const slopesSectionRef = useRef<HTMLDivElement | null>(null);
+  const liftsSectionRef = useRef<HTMLDivElement | null>(null);
+
+  function scrollToSection(ref: React.RefObject<HTMLDivElement>) {
+    const el = ref.current;
+    if (!el) return;
+    // offset zostawiamy naturalny (banner + nagłówek), bo layout jest responsywny
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function openSlopesAndScroll() {
+    setSlopesOpenUI(true);
+    // opcjonalnie: zamknij inne sekcje
+    setLiftsOpenUI(false);
+    setSkipassOpenUI(false);
+
+    // poczekaj na render po rozwinięciu
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToSection(slopesSectionRef)));
+  }
+
+  function openLiftsAndScroll() {
+    setLiftsOpenUI(true);
+    setSlopesOpenUI(false);
+    setSkipassOpenUI(false);
+
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToSection(liftsSectionRef)));
+  }
+
   const [skipassRows, setSkipassRows] = useState<
     Array<{
       product: SkipassProduct;
@@ -724,6 +753,11 @@ export default function ResortPage() {
         .rt-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
         .rt-grid2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
 
+        .rt-card-click { transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
+        .rt-card-click:hover { background: #fafcff; border-color: #cbd5e1; }
+        .rt-card-click:active { transform: translateY(1px); }
+        .rt-card-click:focus-visible { outline: 2px solid rgba(37,99,235,0.55); outline-offset: 2px; }
+
         @media (max-width: 860px) {
           .rt-top { flex-direction:column; align-items:flex-start; }
           .rt-actions { justify-content:flex-start; }
@@ -813,6 +847,7 @@ export default function ResortPage() {
           <DashCard
             icon="🎿"
             title="Trasy"
+            onClick={openSlopesAndScroll}
             leftLabel="Otwarte"
             leftValue={slopesOpen}
             rightLabel="Zamknięte"
@@ -825,6 +860,7 @@ export default function ResortPage() {
           <DashCard
             icon="🚡"
             title="Wyciągi"
+            onClick={openLiftsAndScroll}
             leftLabel="Otwarte"
             leftValue={liftsOpen}
             rightLabel="Zamknięte"
@@ -836,6 +872,7 @@ export default function ResortPage() {
         </div>
 
         {/* ===================== SLOPES ===================== */}
+        <div ref={slopesSectionRef}>
         <CollapsibleSection
           title="Trasy"
           subtitle={`Lista tras w resorcie • ${slopes.length} pozycji`}
@@ -1013,9 +1050,10 @@ export default function ResortPage() {
 
           <DifficultyStats kmByDifficulty={kmByDifficulty} totalKm={totalKm} totalKmAll={totalKmAll} />
         </CollapsibleSection>
+      </div>
 
         {/* ===================== LIFTS ===================== */}
-        <div style={{ marginTop: 14 }}>
+        <div ref={liftsSectionRef} style={{ marginTop: 14 }}>
           <CollapsibleSection
             title="Wyciągi"
             subtitle={`Lista wyciągów w resorcie • ${lifts.length} pozycji`}
@@ -1526,6 +1564,7 @@ function DashCard({
   footerLeft,
   footerRight,
   footerHint,
+  onClick,
 }: {
   icon: string;
   title: string;
@@ -1536,9 +1575,30 @@ function DashCard({
   footerLeft?: string;
   footerRight?: string;
   footerHint?: string;
+  onClick?: () => void;
 }) {
   return (
-    <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#ffffff" }}>
+    <div
+      className={onClick ? "rt-card-click" : undefined}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (!onClick) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      style={{
+        border: "1px solid #e2e8f0",
+        borderRadius: 14,
+        padding: 12,
+        background: "#ffffff",
+        cursor: onClick ? "pointer" : "default",
+        userSelect: "none",
+      }}
+    >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div
