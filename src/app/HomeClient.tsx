@@ -45,11 +45,14 @@ type ResortRow = {
   resort_updated_at?: string | null;
 };
 
-type DifficultyFilter = "all" | "green" | "blue" | "red" | "black";
+type DifficultyOption = "green" | "blue" | "red" | "black";
+// ✅ multi-select; pusty array = wszystkie
+type DifficultyFilter = DifficultyOption[];
 type SortKey = "open_km_desc" | "comfort_desc" | "pph_desc" | "updated_desc" | "price_asc";
 
-type RegionFilter = "all" | string;
-type CountryFilter = "all" | string;
+// ✅ multi-select; pusty array = wszystkie
+type RegionFilter = string[];
+type CountryFilter = string[];
 
 /* ===================== CONST ===================== */
 
@@ -130,20 +133,24 @@ function fmtPPH(v: any) {
   return `${n.toLocaleString("pl-PL")} /h`;
 }
 
-function difficultyLabel(filter: DifficultyFilter) {
-  if (filter === "all") return "Wszystkie";
-  if (filter === "green") return "Zielone / łatwe";
-  if (filter === "blue") return "Niebieskie / średnie";
-  if (filter === "red") return "Czerwone / trudne";
+function difficultyLabel(option: DifficultyOption) {
+  if (option === "green") return "Zielone / łatwe";
+  if (option === "blue") return "Niebieskie / średnie";
+  if (option === "red") return "Czerwone / trudne";
   return "Czarne / bardzo trudne";
 }
 
-function difficultyColor(filter: DifficultyFilter | "all") {
-  if (filter === "green") return "#16a34a";
-  if (filter === "blue") return "#2563eb";
-  if (filter === "red") return "#dc2626";
-  if (filter === "black") return "#0f172a";
-  return "#e2e8f0";
+function difficultySetLabel(sel: DifficultyFilter) {
+  if (!sel.length) return "Wszystkie";
+  if (sel.length === 1) return difficultyLabel(sel[0]);
+  return sel.map(difficultyLabel).join(" • ");
+}
+
+function difficultyColor(option: DifficultyOption) {
+  if (option === "green") return "#16a34a";
+  if (option === "blue") return "#2563eb";
+  if (option === "red") return "#dc2626";
+  return "#0f172a";
 }
 
 function sortLabel(k: SortKey) {
@@ -218,6 +225,8 @@ export default function HomeClient() {
   const forceTable = forcedView === "table";
 
   const [rows, setRows] = useState<ResortRow[]>([]);
+  // ✅ pełna lista po filtrach (do budowania opcji w filtrach)
+  const [filterBaseRows, setFilterBaseRows] = useState<ResortRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -227,23 +236,26 @@ export default function HomeClient() {
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("open_km_desc");
 
-  const [difficulty, setDifficulty] = useState<DifficultyFilter>("all");
+  const [difficulty, setDifficulty] = useState<DifficultyFilter>([]); // [] = wszystkie
   const [kidsTapeOnly, setKidsTapeOnly] = useState(false);
+  // ✅ slider 0..3 km (na mobile czytelny zakres)
   const [minOpenKm, setMinOpenKm] = useState<number>(0);
 
-  const [regionFilter, setRegionFilter] = useState<RegionFilter>("all");
-  const [countryFilter, setCountryFilter] = useState<CountryFilter>("all");
+  const [regionFilter, setRegionFilter] = useState<RegionFilter>([]); // [] = wszystkie
+  const [countryFilter, setCountryFilter] = useState<CountryFilter>([]); // [] = wszystkie
+
 
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
   // sheet (draft)
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [dDifficulty, setDDifficulty] = useState<DifficultyFilter>("all");
+  const [dDifficulty, setDDifficulty] = useState<DifficultyFilter>([]);
   const [dKidsTapeOnly, setDKidsTapeOnly] = useState(false);
   const [dMinOpenKm, setDMinOpenKm] = useState<number>(0);
-  const [dRegion, setDRegion] = useState<RegionFilter>("all");
-  const [dCountry, setDCountry] = useState<CountryFilter>("all");
+  const [dRegion, setDRegion] = useState<RegionFilter>([]);
+  const [dCountry, setDCountry] = useState<CountryFilter>([]);
+
 
   function openFilters() {
     setDDifficulty(difficulty);
@@ -264,53 +276,47 @@ export default function HomeClient() {
   }
 
   function resetDraft() {
-    setDDifficulty("all");
+    setDDifficulty([]);
     setDKidsTapeOnly(false);
     setDMinOpenKm(0);
-    setDRegion("all");
-    setDCountry("all");
+    setDRegion([]);
+    setDCountry([]);
   }
 
   const activeFiltersCount = useMemo(() => {
     let c = 0;
     if (q.trim().length) c += 1;
-    if (difficulty !== "all") c += 1;
+    if (countryFilter.length) c += 1;
+    if (regionFilter.length) c += 1;
+    if (difficulty.length) c += 1;
     if (kidsTapeOnly) c += 1;
     if (minOpenKm > 0) c += 1;
-    if (regionFilter !== "all") c += 1;
-    if (countryFilter !== "all") c += 1;
     return c;
   }, [q, difficulty, kidsTapeOnly, minOpenKm, regionFilter, countryFilter]);
 
   /** Opcje region/kraj budujemy z aktualnie pobranych rekordów (OK do wyboru; filtr robi DB globalnie) */
   const regionOptions = useMemo(() => {
     const set = new Map<string, string>();
-    for (const r of rows) {
+    for (const r of filterBaseRows) {
       const v = (r.region ?? "").trim();
       if (!v) continue;
       set.set(normKey(v), v);
     }
     return Array.from(set.values()).sort((a, b) => a.localeCompare(b, "pl"));
-  }, [rows]);
+  }, [filterBaseRows]);
 
   const countryOptions = useMemo(() => {
     const set = new Map<string, string>();
-    for (const r of rows) {
+    for (const r of filterBaseRows) {
       const v = (r.country ?? "").trim();
       if (!v) continue;
       set.set(normKey(v), v);
     }
     return Array.from(set.values()).sort((a, b) => a.localeCompare(b, "pl"));
-  }, [rows]);
+  }, [filterBaseRows]);
 
-
-  // ✅ zakres dla suwaka "Min. otwarte km" (z danych, ale z sensownym minimum)
-  const maxOpenKmForSlider = useMemo(() => {
-    const m = Math.max(0, ...rows.map((r) => n0(r.open_km)));
-    const rounded = Math.ceil(m / 5) * 5;
-    // minimum 20 (żeby suwak miał sens), maksimum 80 (żeby nie robić kosmosu na mobile)
-    return Math.min(80, Math.max(20, rounded || 20));
-  }, [rows]);
+  // ✅ slider: maksymalnie 3 km na pełną szerokość ekranu
+  const maxOpenKmForSlider = 3;
 
   async function loadGlobalStatsUpdatedAt() {
     const { data, error } = await supabase
@@ -329,75 +335,171 @@ export default function HomeClient() {
     setGlobalStatsUpdatedAt((data as any)?.[0]?.stats_updated_at ?? null);
   }
 
-  async function loadTiles() {
-    const { data, error } = await supabase.rpc("resorts_public_counts", {
-      p_q: q.trim().length ? q.trim() : null,
-      p_difficulty: difficulty === "all" ? null : difficulty,
-      p_kids_tape: kidsTapeOnly ? true : null,
-    });
-
-    if (error) {
-      console.warn("[loadTiles]", error);
-      setTiles({ open: 0, closed: 0 });
-      return;
-    }
-
-    const row = (data as any)?.[0] ?? {};
-    setTiles({
-      open: Number(row.open_count ?? 0) || 0,
-      closed: Number(row.closed_count ?? 0) || 0,
-    });
-  }
+  // ✅ Tiles (Otwarte/Zamknięte) liczymy na podstawie przefiltrowanych wyników w `load()`
 
   async function load() {
     setLoading(true);
     setError(null);
 
-    const offset = (page - 1) * PAGE_SIZE;
+    // ✅ w trybie multi (kraj/region/kolor) pobieramy większy zestaw i filtrujemy/paginujemy lokalnie
+    const isMultiDifficulty = difficulty.length > 1;
 
-    // ✅ GLOBALNE FILTRY: wszystko w DB
-    const { data, error } = await supabase.rpc("resorts_public_list_search_v3", {
-      p_q: q.trim().length ? q.trim() : null,
-      p_status: "all",
-      p_difficulty: difficulty === "all" ? null : difficulty,
-      p_kids_tape: kidsTapeOnly ? true : null,
-      p_sort: sortKey,
+    try {
+      // 1) pobierz bazę danych (jedno lub wiele wywołań, jeśli wybrano wiele kolorów)
+      let baseRows: ResortRow[] = [];
 
-      p_region: regionFilter === "all" ? null : regionFilter,
-      p_country: countryFilter === "all" ? null : countryFilter,
-      p_min_open_km: minOpenKm > 0 ? minOpenKm : null,
+      if (!isMultiDifficulty) {
+        const { data, error } = await supabase.rpc("resorts_public_list_search_v3", {
+          p_q: q.trim().length ? q.trim() : null,
+          p_status: "all",
+          p_difficulty: difficulty.length === 1 ? difficulty[0] : null,
+          p_kids_tape: kidsTapeOnly ? true : null,
+          p_sort: sortKey,
 
-      p_limit: PAGE_SIZE,
-      p_offset: offset,
-    });
+          // multi kraj/region robimy lokalnie
+          p_region: null,
+          p_country: null,
+          // minOpenKm w DB ma sens tylko gdy difficulty nie jest multi
+          p_min_open_km: minOpenKm > 0 ? minOpenKm : null,
 
-    if (error) {
-      setError(error.message);
-      setRows([]);
-      setTotalCount(0);
+          // bierzemy więcej, bo paginujemy lokalnie (szczególnie gdy dochodzą filtry multi)
+          p_limit: 2000,
+          p_offset: 0,
+        });
+
+        if (error) throw error;
+        baseRows = ((data ?? []) as any) as ResortRow[];
+      } else {
+        // ✅ wiele kolorów: pobieramy per kolor i sumujemy statystyki (open_km / total_km / slopes)
+        const diffs = difficulty;
+        const calls = await Promise.all(
+          diffs.map((d) =>
+            supabase.rpc("resorts_public_list_search_v3", {
+              p_q: q.trim().length ? q.trim() : null,
+              p_status: "all",
+              p_difficulty: d,
+              p_kids_tape: kidsTapeOnly ? true : null,
+              p_sort: "open_km_desc",
+              p_region: null,
+              p_country: null,
+              // minOpenKm zastosujemy dopiero po zsumowaniu
+              p_min_open_km: null,
+              p_limit: 2000,
+              p_offset: 0,
+            })
+          )
+        );
+
+        for (const res of calls) {
+          if (res.error) throw res.error;
+        }
+
+        // merge po id
+        const merged = new Map<string, ResortRow>();
+
+        for (const res of calls) {
+          const list = ((res.data ?? []) as any) as ResortRow[];
+          for (const r of list) {
+            const key = String(r.id);
+            const prev = merged.get(key);
+            if (!prev) {
+              merged.set(key, { ...r });
+              continue;
+            }
+
+            // sumujemy tylko pola zależne od trudności
+            const next: ResortRow = { ...prev };
+            next.slopes_open = n0(prev.slopes_open) + n0(r.slopes_open);
+            next.slopes_total = n0(prev.slopes_total) + n0(r.slopes_total);
+            next.open_km = round1(n0(prev.open_km) + n0(r.open_km));
+            next.total_km = round1(n0(prev.total_km) + n0(r.total_km));
+
+            // resort_updated_at: bierz najnowsze
+            const tNew = r.resort_updated_at ? new Date(r.resort_updated_at).getTime() : 0;
+            const tPrev = prev.resort_updated_at ? new Date(prev.resort_updated_at).getTime() : 0;
+            if (tNew > tPrev) next.resort_updated_at = r.resort_updated_at;
+
+            merged.set(key, next);
+          }
+        }
+
+        baseRows = Array.from(merged.values());
+      }
+
+      // 2) dedupe po id (na wypadek duplikatów z RPC)
+      const byId = new Map<string, ResortRow>();
+      for (const r of baseRows) {
+        const key = String(r.id);
+        const prev = byId.get(key);
+
+        const tNew = r.resort_updated_at ? new Date(r.resort_updated_at).getTime() : 0;
+        const tPrev = prev?.resort_updated_at ? new Date(prev.resort_updated_at).getTime() : 0;
+
+        if (!prev || tNew > tPrev) byId.set(key, r);
+      }
+      let filtered = Array.from(byId.values());
+
+      // 3) filtry multi: kraj -> region -> (kolor mamy już w danych) -> dzieci (już w DB) -> min km
+      if (countryFilter.length) {
+        const set = new Set(countryFilter.map((x) => normKey(x)));
+        filtered = filtered.filter((r) => set.has(normKey((r.country ?? "").trim())));
+      }
+
+      if (regionFilter.length) {
+        const set = new Set(regionFilter.map((x) => normKey(x)));
+        filtered = filtered.filter((r) => set.has(normKey((r.region ?? "").trim())));
+      }
+
+      if (minOpenKm > 0) {
+        filtered = filtered.filter((r) => n0(r.open_km) >= minOpenKm);
+      }
+
+      // 4) sort lokalny (pewniejszy w multi)
+      const sorted = [...filtered].sort((a, b) => {
+        if (sortKey === "open_km_desc") return n0(b.open_km) - n0(a.open_km);
+        if (sortKey === "pph_desc") return n0(b.lifts_capacity_open_pph) - n0(a.lifts_capacity_open_pph);
+        if (sortKey === "updated_desc") return tsMs(b.resort_updated_at) - tsMs(a.resort_updated_at);
+        if (sortKey === "price_asc") {
+          const ap = n0(a.skipass_price);
+          const bp = n0(b.skipass_price);
+          // 0/NULL ceny na koniec
+          if (!ap && !bp) return 0;
+          if (!ap) return 1;
+          if (!bp) return -1;
+          return ap - bp;
+        }
+        // comfort_desc
+        const aComfort = n0(a.open_km) > 0 ? n0(a.lifts_capacity_open_pph) / n0(a.open_km) : 0;
+        const bComfort = n0(b.open_km) > 0 ? n0(b.lifts_capacity_open_pph) / n0(b.open_km) : 0;
+        return bComfort - aComfort;
+      });
+
+      // 5) tiles zgodne z filtrem
+      const openCount = sorted.filter((r) => normalizeResortStatus(r.status_norm) === "open").length;
+      const closedCount = sorted.length - openCount;
+      setTiles({ open: openCount, closed: closedCount });
+
+      // ✅ baza dla opcji filtrów (pełna lista po filtrach)
+      setFilterBaseRows(sorted);
+
+      // 6) paginacja
+      const tc = sorted.length;
+      setTotalCount(tc);
+
+      const offset = (page - 1) * PAGE_SIZE;
+      const paged = sorted.slice(offset, offset + PAGE_SIZE);
+
+      setRows(paged);
       setLoading(false);
-      return;
+    } catch (e: any) {
+      setError(e?.message ?? "Błąd wczytywania");
+      setRows([]);
+      setFilterBaseRows([]);
+      setTotalCount(0);
+      setTiles({ open: 0, closed: 0 });
+      setFilterBaseRows([]);
+      setLoading(false);
     }
-
-    const list = ((data ?? []) as any) as ResortRow[];
-
-    // Dedupe po id (na wypadek gdyby RPC zwracało duplikaty)
-    const byId = new Map<string, ResortRow>();
-    for (const r of list) {
-      const key = String(r.id);
-      const prev = byId.get(key);
-
-      const tNew = r.resort_updated_at ? new Date(r.resort_updated_at).getTime() : 0;
-      const tPrev = prev?.resort_updated_at ? new Date(prev.resort_updated_at).getTime() : 0;
-
-      if (!prev || tNew > tPrev) byId.set(key, r);
-    }
-    const deduped = Array.from(byId.values());
-
-    const tc = (data as any)?.[0]?.total_count ?? deduped.length;
-    setTotalCount(Number(tc) || deduped.length);
-    setRows(deduped);
-    setLoading(false);
   }
 
   useEffect(() => setPage(1), [q, difficulty, kidsTapeOnly, sortKey, minOpenKm, regionFilter, countryFilter]);
@@ -410,11 +512,6 @@ export default function HomeClient() {
   useEffect(() => {
     loadGlobalStatsUpdatedAt();
   }, []);
-
-  useEffect(() => {
-    loadTiles();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, difficulty, kidsTapeOnly]);
 
   const resortUpdateTs = (r: ResortRow) => r.resort_updated_at ?? null;
 
@@ -484,12 +581,12 @@ export default function HomeClient() {
             <b style={{ color: "#0f172a" }}>{totalPages}</b>
             <span style={{ marginLeft: 8, color: "#94a3b8" }}>
               (sort: {sortLabel(sortKey)}
-              {difficulty !== "all" ? ` • ${difficultyLabel(difficulty)}` : ""})
+              {difficulty.length ? ` • ${difficultySetLabel(difficulty)}` : ""})
             </span>
             {kidsTapeOnly ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• taśma dla dzieci</span> : null}
             {minOpenKm > 0 ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• open_km &gt; {minOpenKm}</span> : null}
-            {regionFilter !== "all" ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• region: {regionFilter}</span> : null}
-            {countryFilter !== "all" ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• kraj: {countryFilter}</span> : null}
+            {regionFilter.length ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• region: {regionFilter.join(", ")}</span> : null}
+            {countryFilter.length ? <span style={{ marginLeft: 8, color: "#94a3b8" }}>• kraj: {countryFilter.join(", ")}</span> : null}
           </div>
           {loading && <span style={{ color: "#475569", fontSize: 12 }}>Ładowanie…</span>}
           {error && <span style={{ color: "#dc2626", fontSize: 12 }}>Błąd: {error}</span>}
@@ -723,37 +820,65 @@ export default function HomeClient() {
           }
         >
           <div style={{ display: "grid", gap: 14 }}>
-            <div>
-              <div style={labelStyle}>Region</div>
-              <FilterChipsSingle
-                value={dRegion}
-                onChange={(v) => setDRegion(v)}
-                allLabel="Wszystkie"
-                options={regionOptions.map((x) => ({ value: x, label: x }))}
-              />
-              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
-            </div>
+            {/* ✅ hierarchia: kraj -> region -> kolor -> dzieci -> min km */}
 
             <div>
               <div style={labelStyle}>Kraj</div>
-              <FilterChipsSingle
+              <FilterChipsMulti
                 value={dCountry}
-                onChange={(v) => setDCountry(v)}
+                onChange={(v) => {
+                  setDCountry(v);
+                  // ✅ po zmianie kraju usuń regiony, które nie występują w wybranych krajach
+                  if (!v.length) {
+                    // jeśli wracamy do 'wszystkie kraje', zostaw regiony bez zmian
+                    return;
+                  }
+                  const allowed = new Set(
+                    filterBaseRows
+                      .filter((r) => v.some((c) => normKey(c) === normKey(r.country)))
+                      .map((r) => (r.region ?? "").trim())
+                      .filter((x) => x)
+                      .map((x) => normKey(x))
+                  );
+                  setDRegion((prev) => prev.filter((rg) => allowed.has(normKey(rg))));
+                }}
                 allLabel="Wszystkie"
                 options={countryOptions.map((x) => ({ value: x, label: x }))}
               />
-              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
-              <div style={labelStyle}>Kolor / trudność</div>
-              <FilterChipsSingle
+              <div style={labelStyle}>Region</div>
+              <FilterChipsMulti
+                value={dRegion}
+                onChange={(v) => setDRegion(v)}
+                allLabel="Wszystkie"
+                options={regionOptions
+                  .filter((rg) => {
+                    if (!dCountry.length) return true;
+                    // pokaż regiony tylko z wybranych krajów
+                    const allowed = new Set(
+                      filterBaseRows
+                        .filter((r) => dCountry.some((c) => normKey(c) === normKey(r.country)))
+                        .map((r) => (r.region ?? "").trim())
+                        .filter((x) => x)
+                        .map((x) => normKey(x))
+                    );
+                    return allowed.has(normKey(rg));
+                  })
+                  .map((x) => ({ value: x, label: x }))}
+              />
+            </div>
+
+            <div>
+              <div style={labelStyle}>Kolor / trudność tras</div>
+              <FilterChipsMulti
                 value={dDifficulty}
                 onChange={(v) => setDDifficulty(v as any)}
                 allLabel="Wszystkie"
                 getChipStyle={(active, optionValue) => {
                   if (optionValue === "all") return chipBtnStyle(active);
-                  const c = difficultyColor(optionValue as any);
+                  const c = difficultyColor(optionValue as DifficultyOption);
                   return chipBtnStyleColored(active, c);
                 }}
                 options={[
@@ -764,8 +889,18 @@ export default function HomeClient() {
                 ]}
               />
               <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
-                {dDifficulty !== "all" ? `Trasy + km tylko dla: ${difficultyLabel(dDifficulty)}` : "Trasy + km dla wszystkich tras."}
+                {dDifficulty.length ? `Trasy + km dla: ${difficultySetLabel(dDifficulty as any)}` : "Trasy + km dla wszystkich tras."}
               </div>
+            </div>
+
+            <div>
+              <div style={labelStyle}>Dzieci</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                <button type="button" onClick={() => setDKidsTapeOnly((v) => !v)} style={chipBtnStyle(dKidsTapeOnly)} aria-pressed={dKidsTapeOnly}>
+                  Taśma dla dzieci 👶 {dKidsTapeOnly ? "✓" : ""}
+                </button>
+              </div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Pokaż tylko resorty z otwartą taśmą dla dzieci.</div>
             </div>
 
             <div>
@@ -782,7 +917,7 @@ export default function HomeClient() {
                   type="range"
                   min={0}
                   max={maxOpenKmForSlider}
-                  step={0.5}
+                  step={0.1}
                   value={Number.isFinite(dMinOpenKm) ? dMinOpenKm : 0}
                   onChange={(e) => {
                     const v = Number(e.target.value);
@@ -797,17 +932,7 @@ export default function HomeClient() {
                   <span>{maxOpenKmForSlider} km</span>
                 </div>
               </div>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
-            </div>
-
-            <div>
-              <div style={labelStyle}>Dzieci</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                <button type="button" onClick={() => setDKidsTapeOnly((v) => !v)} style={chipBtnStyle(dKidsTapeOnly)} aria-pressed={dKidsTapeOnly}>
-                  Taśma dla dzieci 👶 {dKidsTapeOnly ? "✓" : ""}
-                </button>
-              </div>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Pokaż tylko resorty z otwartą taśmą dla dzieci.</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Zakres suwaka jest celowo krótki (0–3 km) dla wygody na mobile.</div>
             </div>
           </div>
 
@@ -1249,20 +1374,35 @@ function MiniStat({ label, value, sub }: { label: string; value: string; sub?: s
 /* ===================== UI ===================== */
 
 
-function FilterChipsSingle({
+function FilterChipsMulti({
   value,
   onChange,
   options,
   allLabel = "Wszystkie",
   getChipStyle,
 }: {
-  value: string;
-  onChange: (v: string) => void;
+  value: string[];
+  onChange: (v: string[]) => void;
   options: { value: string; label: string }[];
   allLabel?: string;
   getChipStyle?: (active: boolean, optionValue: string) => React.CSSProperties;
 }) {
   const many = options.length >= 12;
+
+  function isActive(v: string) {
+    return value.some((x) => normKey(x) === normKey(v));
+  }
+
+  function toggle(v: string) {
+    const active = isActive(v);
+    if (active) {
+      onChange(value.filter((x) => normKey(x) !== normKey(v)));
+    } else {
+      onChange([...value, v]);
+    }
+  }
+
+  const allActive = value.length === 0;
 
   return (
     <div
@@ -1278,25 +1418,28 @@ function FilterChipsSingle({
     >
       <button
         type="button"
-        onClick={() => onChange("all")}
-        style={getChipStyle ? getChipStyle(value === "all", "all") : chipBtnStyle(value === "all")}
-        aria-pressed={value === "all"}
+        onClick={() => onChange([])}
+        style={getChipStyle ? getChipStyle(allActive, "all") : chipBtnStyle(allActive)}
+        aria-pressed={allActive}
       >
-        {allLabel} {value === "all" ? "✓" : ""}
+        {allLabel} {allActive ? "✓" : ""}
       </button>
 
-      {options.map((o) => (
-        <button
-          key={o.value}
-          type="button"
-          onClick={() => onChange(o.value)}
-          style={getChipStyle ? getChipStyle(value === o.value, o.value) : chipBtnStyle(value === o.value)}
-          aria-pressed={value === o.value}
-          title={o.label}
-        >
-          {o.label} {value === o.value ? "✓" : ""}
-        </button>
-      ))}
+      {options.map((o) => {
+        const active = isActive(o.value);
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={() => toggle(o.value)}
+            style={getChipStyle ? getChipStyle(active, o.value) : chipBtnStyle(active)}
+            aria-pressed={active}
+            title={o.label}
+          >
+            {o.label} {active ? "✓" : ""}
+          </button>
+        );
+      })}
     </div>
   );
 }
