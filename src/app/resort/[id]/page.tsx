@@ -357,6 +357,7 @@ export default function ResortPage() {
   // === scroll-to sections (kafelki Trasy/Wyciągi) ===
   const slopesSectionRef = useRef<HTMLDivElement | null>(null);
   const liftsSectionRef = useRef<HTMLDivElement | null>(null);
+  const skipassSectionRef = useRef<HTMLDivElement | null>(null);
 
 function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
   const el = ref.current;
@@ -380,6 +381,14 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
     setSkipassOpenUI(false);
 
     requestAnimationFrame(() => requestAnimationFrame(() => scrollToSection(liftsSectionRef)));
+  }
+
+  function openSkipassAndScroll() {
+    setSkipassOpenUI(true);
+    setSlopesOpenUI(false);
+    setLiftsOpenUI(false);
+
+    requestAnimationFrame(() => requestAnimationFrame(() => scrollToSection(skipassSectionRef)));
   }
 
   const [skipassRows, setSkipassRows] = useState<
@@ -752,6 +761,8 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
         .rt-actions { display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
         .rt-grid2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
 
+        .rt-actions button, .rt-actions a { white-space: nowrap; }
+
         .rt-card-click { transition: background 120ms ease, border-color 120ms ease, transform 120ms ease; }
         .rt-card-click:hover { background: #fafcff; border-color: #cbd5e1; }
         .rt-card-click:active { transform: translateY(1px); }
@@ -759,7 +770,9 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
 
         @media (max-width: 860px) {
           .rt-top { flex-direction:column; align-items:flex-start; }
-          .rt-actions { justify-content:flex-start; }
+          /* 4 przyciski w jednym wierszu na mobile */
+          .rt-actions { justify-content:flex-start; flex-wrap: nowrap; width: 100%; gap: 8px; }
+          .rt-actions > button, .rt-actions > a { flex: 1 1 0; padding: 9px 8px; font-size: 12px; }
           .rt-grid2 { grid-template-columns: 1fr; }
         }
       `}</style>
@@ -812,7 +825,7 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
             <div className="rt-actions" style={{ marginTop: 10 }}>
               {hasMap ? (
                 <button onClick={openMap} style={btnGhost()}>
-                  🗺️ Mapa tras
+                  🗺️ {isMobile ? "Mapa" : "Mapa tras"}
                 </button>
               ) : (
                 <span style={{ fontSize: 12, color: "#94a3b8" }}>Brak mapy</span>
@@ -826,9 +839,13 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
                 <span style={{ fontSize: 12, color: "#94a3b8" }}>Brak kamer</span>
               )}
 
+              <button onClick={openSkipassAndScroll} style={btnGhost()}>
+                🎟️ {isMobile ? "Skipass" : "Skipassy"}
+              </button>
+
               {resort?.url ? (
                 <a href={resort.url} target="_blank" rel="noreferrer" style={{ ...btnGhost(), textDecoration: "none" }}>
-                  Strona resortu
+                  {isMobile ? "Strona" : "Strona resortu"}
                 </a>
               ) : null}
             </div>
@@ -1169,7 +1186,7 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
         </div>
 
         {/* ===================== SKIPASSES ===================== */}
-        <div style={{ marginTop: 14 }}>
+        <div ref={skipassSectionRef} style={{ marginTop: 14 }}>
           <CollapsibleSection
             title="Skipassy"
             subtitle={`Wszystkie przypięte skipassy wg skipass_coverage • ${skipassRows.length} pozycji (ceny tylko ważne dziś)`}
