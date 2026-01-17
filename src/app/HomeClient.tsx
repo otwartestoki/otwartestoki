@@ -138,6 +138,14 @@ function difficultyLabel(filter: DifficultyFilter) {
   return "Czarne / bardzo trudne";
 }
 
+function difficultyColor(filter: DifficultyFilter | "all") {
+  if (filter === "green") return "#16a34a";
+  if (filter === "blue") return "#2563eb";
+  if (filter === "red") return "#dc2626";
+  if (filter === "black") return "#0f172a";
+  return "#e2e8f0";
+}
+
 function sortLabel(k: SortKey) {
   switch (k) {
     case "open_km_desc":
@@ -293,6 +301,15 @@ export default function HomeClient() {
       set.set(normKey(v), v);
     }
     return Array.from(set.values()).sort((a, b) => a.localeCompare(b, "pl"));
+  }, [rows]);
+
+
+  // ✅ zakres dla suwaka "Min. otwarte km" (z danych, ale z sensownym minimum)
+  const maxOpenKmForSlider = useMemo(() => {
+    const m = Math.max(0, ...rows.map((r) => n0(r.open_km)));
+    const rounded = Math.ceil(m / 5) * 5;
+    // minimum 20 (żeby suwak miał sens), maksimum 80 (żeby nie robić kosmosu na mobile)
+    return Math.min(80, Math.max(20, rounded || 20));
   }, [rows]);
 
   async function loadGlobalStatsUpdatedAt() {
@@ -705,97 +722,95 @@ export default function HomeClient() {
             </div>
           }
         >
-          <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 14 }}>
             <div>
-              <label style={labelStyle}>Region</label>
-              <select value={dRegion} onChange={(e) => setDRegion(e.target.value)} style={selectStyle}>
-                <option value="all">Wszystkie</option>
-                {regionOptions.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
-              </select>
+              <div style={labelStyle}>Region</div>
+              <FilterChipsSingle
+                value={dRegion}
+                onChange={(v) => setDRegion(v)}
+                allLabel="Wszystkie"
+                options={regionOptions.map((x) => ({ value: x, label: x }))}
+              />
               <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
-              <label style={labelStyle}>Kraj</label>
-              <select value={dCountry} onChange={(e) => setDCountry(e.target.value)} style={selectStyle}>
-                <option value="all">Wszystkie</option>
-                {countryOptions.map((x) => (
-                  <option key={x} value={x}>
-                    {x}
-                  </option>
-                ))}
-              </select>
+              <div style={labelStyle}>Kraj</div>
+              <FilterChipsSingle
+                value={dCountry}
+                onChange={(v) => setDCountry(v)}
+                allLabel="Wszystkie"
+                options={countryOptions.map((x) => ({ value: x, label: x }))}
+              />
               <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
-              <label style={labelStyle}>Kolor / trudność</label>
-              <select value={dDifficulty} onChange={(e) => setDDifficulty(e.target.value as any)} style={selectStyle}>
-                <option value="all">Wszystkie</option>
-                <option value="green">Zielone / łatwe</option>
-                <option value="blue">Niebieskie / średnie</option>
-                <option value="red">Czerwone / trudne</option>
-                <option value="black">Czarne / bardzo trudne</option>
-              </select>
+              <div style={labelStyle}>Kolor / trudność</div>
+              <FilterChipsSingle
+                value={dDifficulty}
+                onChange={(v) => setDDifficulty(v as any)}
+                allLabel="Wszystkie"
+                getChipStyle={(active, optionValue) => {
+                  if (optionValue === "all") return chipBtnStyle(active);
+                  const c = difficultyColor(optionValue as any);
+                  return chipBtnStyleColored(active, c);
+                }}
+                options={[
+                  { value: "green", label: "Zielone" },
+                  { value: "blue", label: "Niebieskie" },
+                  { value: "red", label: "Czerwone" },
+                  { value: "black", label: "Czarne" },
+                ]}
+              />
               <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
                 {dDifficulty !== "all" ? `Trasy + km tylko dla: ${difficultyLabel(dDifficulty)}` : "Trasy + km dla wszystkich tras."}
               </div>
             </div>
 
             <div>
-              <label style={labelStyle}>Min. otwarte km (więcej niż)</label>
-              <div style={{ display: "flex", gap: 10 }}>
+              <div style={labelStyle}>Min. otwarte km</div>
+              <div style={{ display: "grid", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ fontWeight: 900, color: "#0f172a" }}>{Number.isFinite(dMinOpenKm) ? dMinOpenKm : 0} km</div>
+                  <button type="button" onClick={() => setDMinOpenKm(0)} disabled={dMinOpenKm <= 0} style={btnStyle(dMinOpenKm <= 0)}>
+                    Reset
+                  </button>
+                </div>
+
                 <input
-                  type="number"
-                  inputMode="decimal"
+                  type="range"
                   min={0}
+                  max={maxOpenKmForSlider}
                   step={0.5}
                   value={Number.isFinite(dMinOpenKm) ? dMinOpenKm : 0}
                   onChange={(e) => {
-                    const v = Number(String(e.target.value).replace(",", "."));
+                    const v = Number(e.target.value);
                     setDMinOpenKm(Number.isFinite(v) ? Math.max(0, v) : 0);
                   }}
-                  style={inputStyle}
-                  placeholder="np. 10"
+                  style={{ width: "100%" }}
+                  aria-label="Min. otwarte km"
                 />
-                <button type="button" onClick={() => setDMinOpenKm(0)} disabled={dMinOpenKm <= 0} style={btnStyle(dMinOpenKm <= 0)}>
-                  Reset
-                </button>
+
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#94a3b8" }}>
+                  <span>0</span>
+                  <span>{maxOpenKmForSlider} km</span>
+                </div>
               </div>
               <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
-              <label style={labelStyle}>Dzieci</label>
-              <button
-                type="button"
-                onClick={() => setDKidsTapeOnly((v) => !v)}
-                style={{
-                  height: 44,
-                  borderRadius: 12,
-                  border: "1px solid #e2e8f0",
-                  background: dKidsTapeOnly ? "#0f172a" : "#ffffff",
-                  color: dKidsTapeOnly ? "#ffffff" : "#0f172a",
-                  fontWeight: 900,
-                  padding: "0 12px",
-                  whiteSpace: "nowrap",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  width: "fit-content",
-                }}
-                aria-pressed={dKidsTapeOnly}
-              >
-                Taśma dla dzieci 👶 {dKidsTapeOnly ? "✓" : ""}
-              </button>
+              <div style={labelStyle}>Dzieci</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                <button type="button" onClick={() => setDKidsTapeOnly((v) => !v)} style={chipBtnStyle(dKidsTapeOnly)} aria-pressed={dKidsTapeOnly}>
+                  Taśma dla dzieci 👶 {dKidsTapeOnly ? "✓" : ""}
+                </button>
+              </div>
               <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Pokaż tylko resorty z otwartą taśmą dla dzieci.</div>
             </div>
           </div>
+
         </BottomSheet>
 
         <style jsx>{`
@@ -1233,6 +1248,59 @@ function MiniStat({ label, value, sub }: { label: string; value: string; sub?: s
 
 /* ===================== UI ===================== */
 
+
+function FilterChipsSingle({
+  value,
+  onChange,
+  options,
+  allLabel = "Wszystkie",
+  getChipStyle,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  allLabel?: string;
+  getChipStyle?: (active: boolean, optionValue: string) => React.CSSProperties;
+}) {
+  const many = options.length >= 12;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 10,
+        alignItems: "stretch",
+        maxHeight: many ? 220 : undefined,
+        overflowY: many ? "auto" : undefined,
+        paddingRight: many ? 4 : undefined,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => onChange("all")}
+        style={getChipStyle ? getChipStyle(value === "all", "all") : chipBtnStyle(value === "all")}
+        aria-pressed={value === "all"}
+      >
+        {allLabel} {value === "all" ? "✓" : ""}
+      </button>
+
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          style={getChipStyle ? getChipStyle(value === o.value, o.value) : chipBtnStyle(value === o.value)}
+          aria-pressed={value === o.value}
+          title={o.label}
+        >
+          {o.label} {value === o.value ? "✓" : ""}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Tile({ title, value }: { title: string; value: number }) {
   return (
     <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, background: "#ffffff" }}>
@@ -1338,6 +1406,38 @@ function btnStyle(disabled: boolean) {
     fontWeight: 900,
     fontSize: 12,
     whiteSpace: "nowrap",
+  } as const;
+}
+
+
+// ✅ kafelki / chips w filtrach (mobile-first)
+function chipBtnStyle(active: boolean) {
+  return {
+    height: 44,
+    borderRadius: 12,
+    border: "1px solid #e2e8f0",
+    background: active ? "#0f172a" : "#ffffff",
+    color: active ? "#ffffff" : "#0f172a",
+    fontWeight: 950,
+    padding: "0 12px",
+    whiteSpace: "nowrap",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  } as const;
+}
+
+// ✅ kafelki z ramką w kolorze (np. trudność tras)
+function chipBtnStyleColored(active: boolean, color: string) {
+  return {
+    ...chipBtnStyle(active),
+    border: `1px solid ${color}`,
+    background: active ? color : "#ffffff",
+    color: active ? "#ffffff" : "#0f172a",
   } as const;
 }
 
