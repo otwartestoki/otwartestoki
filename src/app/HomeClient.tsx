@@ -716,7 +716,7 @@ export default function HomeClient() {
                   </option>
                 ))}
               </select>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Filtr działa globalnie (w bazie danych).</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
@@ -729,7 +729,7 @@ export default function HomeClient() {
                   </option>
                 ))}
               </select>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Filtr działa globalnie (w bazie danych).</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
@@ -741,7 +741,7 @@ export default function HomeClient() {
                 <option value="red">Czerwone / trudne</option>
                 <option value="black">Czarne / bardzo trudne</option>
               </select>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>
                 {dDifficulty !== "all" ? `Trasy + km tylko dla: ${difficultyLabel(dDifficulty)}` : "Trasy + km dla wszystkich tras."}
               </div>
             </div>
@@ -766,7 +766,7 @@ export default function HomeClient() {
                   Reset
                 </button>
               </div>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Filtr działa globalnie (w bazie danych).</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
@@ -793,7 +793,7 @@ export default function HomeClient() {
               >
                 Taśma dla dzieci 👶 {dKidsTapeOnly ? "✓" : ""}
               </button>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Pokaż tylko resorty z otwartą taśmą dla dzieci.</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#475569" }}>Pokaż tylko resorty z otwartą taśmą dla dzieci.</div>
             </div>
           </div>
         </BottomSheet>
@@ -1301,12 +1301,15 @@ const selectStyle: React.CSSProperties = {
   border: "1px solid #e2e8f0",
   borderRadius: 12,
   background: "#fbfdff",
+  color: "#0f172a",      // 🔥
+  fontWeight: 600,
 };
 
 const labelStyle: React.CSSProperties = {
   display: "block",
-  fontSize: 12,
-  color: "#64748b",
+  fontSize: 13,
+  color: "#0f172a", // 🔥 slate-900
+  fontWeight: 800,
   marginBottom: 6,
 };
 
