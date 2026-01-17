@@ -358,12 +358,11 @@ export default function ResortPage() {
   const slopesSectionRef = useRef<HTMLDivElement | null>(null);
   const liftsSectionRef = useRef<HTMLDivElement | null>(null);
 
-  function scrollToSection(ref: React.RefObject<HTMLDivElement>) {
-    const el = ref.current;
-    if (!el) return;
-    // offset zostawiamy naturalny (banner + nagłówek), bo layout jest responsywny
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
+function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
+  const el = ref.current;
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
 
   function openSlopesAndScroll() {
     setSlopesOpenUI(true);
