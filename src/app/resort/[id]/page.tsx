@@ -1466,11 +1466,23 @@ function ContentBanner({ updatedAt }: { updatedAt: string | null }) {
   return (
     <div style={{ border: "1px solid #e2e8f0", borderRadius: 16, overflow: "hidden", background: "#fafcff" }}>
       <div style={{ width: "100%", aspectRatio: "1470 / 300", background: "#fafcff" }}>
-        <img
-          src="/baner.png"
-          alt="otwartestoki banner"
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
-        />
+<a
+  href="https://www.otwartestoki.pl"
+  style={{ display: "block", width: "100%", height: "100%" }}
+>
+  <img
+    src="/baner.png"
+    alt="otwartestoki banner"
+    style={{
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+      objectPosition: "center",
+      display: "block",
+      cursor: "pointer",
+    }}
+  />
+</a>
       </div>
       <div
         style={{
