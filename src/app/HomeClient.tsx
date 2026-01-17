@@ -42,7 +42,6 @@ type ResortRow = {
 
   total_count?: number | null;
 
-  // ✅ najnowsza zmiana resortu/wyciągu/trasy (z VIEW): max(resort_updated_at)
   resort_updated_at?: string | null;
 };
 
@@ -61,8 +60,7 @@ const PAGE_SIZE = 15;
 function normalizeResortStatus(s?: string | null) {
   const v = (s ?? "").toLowerCase().trim();
   if (["open", "otwarty", "otwarta", "otwarte", "opened"].includes(v)) return "open";
-  if (["closed", "zamkniety", "zamknięty", "zamknieta", "zamknięta", "zamkniete", "zamknięte"].includes(v))
-    return "closed";
+  if (["closed", "zamkniety", "zamknięty", "zamknieta", "zamknięta", "zamkniete", "zamknięte"].includes(v)) return "closed";
   return "closed";
 }
 
@@ -117,9 +115,7 @@ function round1(x: number) {
 
 function fmtMoney(x: number, currency: string) {
   const cur = (currency ?? "PLN").toUpperCase();
-  if (cur === "PLN") {
-    return x.toLocaleString("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 });
-  }
+  if (cur === "PLN") return x.toLocaleString("pl-PL", { style: "currency", currency: "PLN", maximumFractionDigits: 0 });
   return `${x.toFixed(0)} ${cur}`;
 }
 
@@ -181,15 +177,27 @@ function resortPath(r: { id: any; name?: string | null; city?: string | null; re
 }
 
 function normKey(s: any) {
-  return String(s ?? "")
-    .trim()
-    .toLowerCase();
+  return String(s ?? "").trim().toLowerCase();
 }
 
 function tsMs(x?: string | null) {
   if (!x) return 0;
   const t = new Date(x).getTime();
   return Number.isFinite(t) ? t : 0;
+}
+
+/** ✅ Mobile: skróć długi opis skipassa (żeby nie rozpychał kart) */
+function shortSkipassLabel(label?: string | null) {
+  const s = String(label ?? "").trim();
+  if (!s) return null;
+
+  const m = s.match(/(^|\s)(\d{1,2})\s*(h|hr|hrs|hour|hours|godz|godz\.|godzina|godziny)\b/i);
+  if (m) return `${m[2]}h`;
+
+  const d = s.match(/(^|\s)(\d{1,2})\s*(day|days|dzień|dzien|dni)\b/i);
+  if (d) return `${d[2]}d`;
+
+  return s.length > 18 ? s.slice(0, 18).trim() + "…" : s;
 }
 
 /* ===================== COMPONENT ===================== */
@@ -206,7 +214,6 @@ export default function HomeClient() {
   const [error, setError] = useState<string | null>(null);
 
   const [globalStatsUpdatedAt, setGlobalStatsUpdatedAt] = useState<string | null>(null);
-
   const [tiles, setTiles] = useState<{ open: number; closed: number }>({ open: 0, closed: 0 });
 
   const [q, setQ] = useState("");
@@ -222,7 +229,7 @@ export default function HomeClient() {
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
 
-  // sheet
+  // sheet (draft)
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [dDifficulty, setDDifficulty] = useState<DifficultyFilter>("all");
   const [dKidsTapeOnly, setDKidsTapeOnly] = useState(false);
@@ -267,6 +274,7 @@ export default function HomeClient() {
     return c;
   }, [q, difficulty, kidsTapeOnly, minOpenKm, regionFilter, countryFilter]);
 
+  /** Opcje region/kraj budujemy z aktualnie pobranych rekordów (OK do wyboru; filtr robi DB globalnie) */
   const regionOptions = useMemo(() => {
     const set = new Map<string, string>();
     for (const r of rows) {
@@ -307,7 +315,7 @@ export default function HomeClient() {
   async function loadTiles() {
     const { data, error } = await supabase.rpc("resorts_public_counts", {
       p_q: q.trim().length ? q.trim() : null,
-      p_difficulty: difficulty,
+      p_difficulty: difficulty === "all" ? null : difficulty,
       p_kids_tape: kidsTapeOnly ? true : null,
     });
 
@@ -330,13 +338,18 @@ export default function HomeClient() {
 
     const offset = (page - 1) * PAGE_SIZE;
 
-    // ✅ Zostawiamy RPC jak było – zakładamy że zwraca resort_updated_at (najświeższa zmiana z DB)
-    const { data, error } = await supabase.rpc("resorts_public_list_search_v2", {
+    // ✅ GLOBALNE FILTRY: wszystko w DB
+    const { data, error } = await supabase.rpc("resorts_public_list_search_v3", {
       p_q: q.trim().length ? q.trim() : null,
       p_status: "all",
-      p_difficulty: difficulty,
+      p_difficulty: difficulty === "all" ? null : difficulty,
       p_kids_tape: kidsTapeOnly ? true : null,
       p_sort: sortKey,
+
+      p_region: regionFilter === "all" ? null : regionFilter,
+      p_country: countryFilter === "all" ? null : countryFilter,
+      p_min_open_km: minOpenKm > 0 ? minOpenKm : null,
+
       p_limit: PAGE_SIZE,
       p_offset: offset,
     });
@@ -351,7 +364,7 @@ export default function HomeClient() {
 
     const list = ((data ?? []) as any) as ResortRow[];
 
-    // ✅ dedupe po id i bierz najświeższy resort_updated_at
+    // Dedupe po id (na wypadek gdyby RPC zwracało duplikaty)
     const byId = new Map<string, ResortRow>();
     for (const r of list) {
       const key = String(r.id);
@@ -364,9 +377,7 @@ export default function HomeClient() {
     }
     const deduped = Array.from(byId.values());
 
-    // total_count z RPC może liczyć “przed dedupe”, ale UI ma pokazać realną liczbę rekordów na stronie:
     const tc = (data as any)?.[0]?.total_count ?? deduped.length;
-
     setTotalCount(Number(tc) || deduped.length);
     setRows(deduped);
     setLoading(false);
@@ -377,7 +388,7 @@ export default function HomeClient() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, q, difficulty, kidsTapeOnly, sortKey]);
+  }, [page, q, difficulty, kidsTapeOnly, sortKey, minOpenKm, regionFilter, countryFilter]);
 
   useEffect(() => {
     loadGlobalStatsUpdatedAt();
@@ -388,31 +399,19 @@ export default function HomeClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, difficulty, kidsTapeOnly]);
 
-  // ✅ Aktualizacja: bierzemy NAJNOWSZY timestamp z resort_updated_at (i już niczego nie fallbackujemy)
   const resortUpdateTs = (r: ResortRow) => r.resort_updated_at ?? null;
 
-  const filteredRows = useMemo(() => {
-    const thr = Number.isFinite(minOpenKm) ? minOpenKm : 0;
+  // ✅ NIE FILTRUJEMY LOKALNIE – DB daje już wyniki globalne
+  const visibleRows = useMemo(() => {
+    let out = rows;
 
-    let out = !thr || thr <= 0 ? rows : rows.filter((r) => n0(r.open_km) > thr);
-
-    if (regionFilter !== "all") {
-      const key = normKey(regionFilter);
-      out = out.filter((r) => normKey(r.region) === key);
-    }
-
-    if (countryFilter !== "all") {
-      const key = normKey(countryFilter);
-      out = out.filter((r) => normKey(r.country) === key);
-    }
-
-    // ✅ sort: updated_desc = po resort_updated_at (najnowsza zmiana w resort/wyciąg/trasa)
+    // jeśli chcesz mimo wszystko mieć "updated_desc" wymuszone po stronie – zostawiamy:
     if (sortKey === "updated_desc") {
       out = [...out].sort((a, b) => tsMs(resortUpdateTs(b)) - tsMs(resortUpdateTs(a)));
     }
 
     return out;
-  }, [rows, minOpenKm, sortKey, regionFilter, countryFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows, sortKey]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
@@ -462,19 +461,10 @@ export default function HomeClient() {
         </div>
 
         {/* ===================== INFO ROW ===================== */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginBottom: 10,
-            flexWrap: "wrap",
-            marginTop: 12,
-          }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap", marginTop: 12 }}>
           <div style={{ color: "#64748b", fontSize: 12 }}>
-            Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona{" "}
-            <b style={{ color: "#0f172a" }}>{page}</b> / <b style={{ color: "#0f172a" }}>{totalPages}</b>
+            Wyniki: <b style={{ color: "#0f172a" }}>{totalCount}</b> • Strona <b style={{ color: "#0f172a" }}>{page}</b> /{" "}
+            <b style={{ color: "#0f172a" }}>{totalPages}</b>
             <span style={{ marginLeft: 8, color: "#94a3b8" }}>
               (sort: {sortLabel(sortKey)}
               {difficulty !== "all" ? ` • ${difficultyLabel(difficulty)}` : ""})
@@ -490,12 +480,7 @@ export default function HomeClient() {
 
         {/* ===================== CARDS (mobile + force) ===================== */}
         <div className={forceCards ? "forceShow" : forceTable ? "hide" : "mobileOnly"}>
-          <ResortCards
-            rows={filteredRows}
-            loading={loading}
-            onOpenResort={(r) => router.push(resortPath(r))}
-            resortUpdateTs={resortUpdateTs}
-          />
+          <ResortCards rows={visibleRows} loading={loading} onOpenResort={(r) => router.push(resortPath(r))} resortUpdateTs={resortUpdateTs} />
         </div>
 
         {/* ===================== TABLE (desktop + force) ===================== */}
@@ -512,21 +497,19 @@ export default function HomeClient() {
                     <Th style={{ width: 140 }}>Skipass</Th>
                     <Th style={{ width: 90 }}>Wyciągi</Th>
                     <Th style={{ width: 130 }}>Przepustowość</Th>
-
-                    {/* ✅ ostatnia kolumna: Aktualizacja + CTA w jednym wierszu */}
                     <Th style={{ width: 150 }}>Aktualizacja</Th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredRows.length === 0 && !loading ? (
+                  {visibleRows.length === 0 && !loading ? (
                     <tr>
                       <td colSpan={8} style={{ padding: 14, color: "#64748b", fontSize: 13 }}>
                         Brak wyników dla wybranych filtrów.
                       </td>
                     </tr>
                   ) : (
-                    filteredRows.map((r, idx) => {
+                    visibleRows.map((r, idx) => {
                       const s = normalizeResortStatus(r.status_norm);
 
                       const openKm = n0(r.open_km);
@@ -542,9 +525,7 @@ export default function HomeClient() {
                       const price = Number(r.skipass_price ?? 0);
                       const cur = (r.skipass_currency ?? "PLN").toUpperCase();
 
-                      const sublineParts = [r.city, r.region, r.country].filter(
-                        (x) => !!(x && String(x).trim().length > 0)
-                      ) as string[];
+                      const sublineParts = [r.city, r.region, r.country].filter((x) => !!(x && String(x).trim().length > 0)) as string[];
                       const subline = sublineParts.length > 0 ? sublineParts.join(" • ") : null;
 
                       const upd = resortUpdateTs(r);
@@ -617,11 +598,8 @@ export default function HomeClient() {
 
                           <Td style={{ textAlign: "left" }}>{`${liftsOpen} / ${liftsTotal}`}</Td>
 
-                          <Td style={{ textAlign: "left" }}>
-                            {pphOpen > 0 ? fmtPPH(pphOpen) : <span style={{ color: "#94a3b8" }}>—</span>}
-                          </Td>
+                          <Td style={{ textAlign: "left" }}>{pphOpen > 0 ? fmtPPH(pphOpen) : <span style={{ color: "#94a3b8" }}>—</span>}</Td>
 
-                          {/* ✅ Aktualizacja (resort_updated_at) + delikatny link-button po prawej */}
                           <Td style={{ textAlign: "left" }}>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                               <span title={upd ? fmtDate(upd) : "Brak aktualizacji"}>{upd ? fmtDateShort(upd) : "—"}</span>
@@ -647,38 +625,16 @@ export default function HomeClient() {
               </table>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: 12,
-                borderTop: "1px solid #e2e8f0",
-                background: "#ffffff",
-                gap: 10,
-                flexWrap: "wrap",
-              }}
-            >
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1 || loading}
-                style={pagerBtnStyle(page <= 1 || loading)}
-              >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 12, borderTop: "1px solid #e2e8f0", background: "#ffffff", gap: 10, flexWrap: "wrap" }}>
+              <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading} style={pagerBtnStyle(page <= 1 || loading)}>
                 ← Poprzednia
               </button>
 
               <div style={{ color: "#64748b", fontSize: 12 }}>
                 {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z {totalCount}
-                {minOpenKm > 0 ? (
-                  <span style={{ marginLeft: 8, color: "#94a3b8" }}>• po filtrze open_km: {filteredRows.length} na tej stronie</span>
-                ) : null}
               </div>
 
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages || loading}
-                style={pagerBtnStyle(page >= totalPages || loading)}
-              >
+              <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading} style={pagerBtnStyle(page >= totalPages || loading)}>
                 Następna →
               </button>
             </div>
@@ -687,24 +643,8 @@ export default function HomeClient() {
 
         {/* ✅ paginacja pod kartami (mobile) */}
         <div className={forceCards ? "forceShow" : forceTable ? "hide" : "mobileOnly"} style={{ marginTop: 10 }}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: 12,
-              border: "1px solid #e2e8f0",
-              borderRadius: 14,
-              background: "#ffffff",
-              gap: 10,
-              flexWrap: "wrap",
-            }}
-          >
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page <= 1 || loading}
-              style={pagerBtnStyle(page <= 1 || loading)}
-            >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 12, border: "1px solid #e2e8f0", borderRadius: 14, background: "#ffffff", gap: 10, flexWrap: "wrap" }}>
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading} style={pagerBtnStyle(page <= 1 || loading)}>
               ← Poprzednia
             </button>
 
@@ -712,29 +652,14 @@ export default function HomeClient() {
               {totalCount === 0 ? "0" : (page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} z {totalCount}
             </div>
 
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page >= totalPages || loading}
-              style={pagerBtnStyle(page >= totalPages || loading)}
-            >
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages || loading} style={pagerBtnStyle(page >= totalPages || loading)}>
               Następna →
             </button>
           </div>
         </div>
 
-        <div
-          style={{
-            marginTop: 18,
-            paddingTop: 12,
-            borderTop: "1px dashed #e2e8f0",
-            fontSize: 12,
-            color: "#94a3b8",
-            lineHeight: 1.5,
-          }}
-        >
-          Dane prezentowane na stronie pochodzą bezpośrednio od ośrodków narciarskich, z kamer online oraz z wizji lokalnych.
-          Informacje są aktualizowane codziennie i mogą różnić się od stanu faktycznego w danym momencie. W razie znalezienia
-          błędów lub braków resortów proszę o kontakt :{" "}
+        <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px dashed #e2e8f0", fontSize: 12, color: "#94a3b8", lineHeight: 1.5 }}>
+          Dane prezentowane na stronie pochodzą bezpośrednio od ośrodków narciarskich, z kamer online oraz z wizji lokalnych. Informacje są aktualizowane codziennie i mogą różnić się od stanu faktycznego w danym momencie. W razie znalezienia błędów lub braków resortów proszę o kontakt :{" "}
           <a href="mailto:kontakt@otwartestoki.pl" style={{ color: "#2563eb", fontWeight: 800, textDecoration: "none" }}>
             kontakt@otwartestoki.pl
           </a>
@@ -791,9 +716,7 @@ export default function HomeClient() {
                   </option>
                 ))}
               </select>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                Filtr działa lokalnie (na bieżącej stronie wyników).
-              </div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
@@ -806,9 +729,7 @@ export default function HomeClient() {
                   </option>
                 ))}
               </select>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                Filtr działa lokalnie (na bieżącej stronie wyników).
-              </div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
@@ -845,9 +766,7 @@ export default function HomeClient() {
                   Reset
                 </button>
               </div>
-              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>
-                Filtr działa lokalnie (na bieżącej stronie wyników).
-              </div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>Filtr działa globalnie (w bazie danych).</div>
             </div>
 
             <div>
@@ -943,7 +862,6 @@ export default function HomeClient() {
             white-space: nowrap;
           }
 
-          /* ✅ hover na wierszach tabeli */
           :global(tr.rowLink) {
             cursor: pointer;
             transition: background 120ms ease;
@@ -993,24 +911,9 @@ function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string 
   return (
     <div style={{ border: "1px solid #e2e8f0", borderRadius: 16, overflow: "hidden", background: "#fafcff" }}>
       <div style={{ width: "100%", aspectRatio: "1470 / 300", background: "#fafcff" }}>
-        <img
-          src="/baner.png"
-          alt="otwartestoki banner"
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }}
-        />
+        <img src="/baner.png" alt="otwartestoki banner" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
       </div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "flex-end",
-          gap: 8,
-          padding: "10px 12px",
-          background: "#ffffff",
-          borderTop: "1px solid #e2e8f0",
-          color: "#64748b",
-          fontSize: 12,
-        }}
-      >
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 12px", background: "#ffffff", borderTop: "1px solid #e2e8f0", color: "#64748b", fontSize: 12 }}>
         Ostatnia aktualizacja: <b style={{ color: "#0f172a" }}>{fmtDate(globalStatsUpdatedAt)}</b>
       </div>
     </div>
@@ -1057,11 +960,7 @@ function BottomSheet({
       <div className="bsPanel" style={{ transform: open ? "translateY(0)" : "translateY(110%)" }} role="dialog" aria-modal="true" aria-label={title}>
         <div style={{ padding: 14, borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <div style={{ fontWeight: 950, color: "#0f172a" }}>{title}</div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ border: "1px solid #e2e8f0", background: "#ffffff", borderRadius: 12, height: 36, padding: "0 12px", fontWeight: 900, color: "#0f172a" }}
-          >
+          <button type="button" onClick={onClose} style={{ border: "1px solid #e2e8f0", background: "#ffffff", borderRadius: 12, height: 36, padding: "0 12px", fontWeight: 900, color: "#0f172a" }}>
             Zamknij
           </button>
         </div>
@@ -1112,11 +1011,7 @@ function ResortCards({
   resortUpdateTs: (r: ResortRow) => string | null;
 }) {
   if (rows.length === 0 && !loading) {
-    return (
-      <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, background: "#fff", padding: 14, color: "#64748b" }}>
-        Brak wyników dla wybranych filtrów.
-      </div>
-    );
+    return <div style={{ border: "1px solid #e2e8f0", borderRadius: 14, background: "#fff", padding: 14, color: "#64748b" }}>Brak wyników dla wybranych filtrów.</div>;
   }
 
   return (
@@ -1160,24 +1055,16 @@ function ResortCards({
               padding: 12,
               boxShadow: "0 1px 0 rgba(15,23,42,0.04)",
               cursor: "pointer",
+              width: "100%",
+              maxWidth: "100%",
+              overflow: "hidden",
             }}
           >
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 950, color: "#0f172a" }}>{r.name ?? "—"}</div>
                 {subline ? (
-                  <div
-                    style={{
-                      marginTop: 2,
-                      color: "#94a3b8",
-                      fontSize: 12,
-                      whiteSpace: "nowrap",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      maxWidth: "100%",
-                    }}
-                    title={subline}
-                  >
+                  <div style={{ marginTop: 2, color: "#94a3b8", fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }} title={subline}>
                     {subline}
                   </div>
                 ) : null}
@@ -1196,16 +1083,13 @@ function ResortCards({
               <MiniStat label="Przepustowość" value={pphOpen > 0 ? fmtPPH(pphOpen) : "—"} />
             </div>
 
-            {/* ✅ ZMIANA: stabilny layout (Aktualizacja + Zobacz) na mobile */}
             <div className="cardBottomRow">
               <div className="skipassBlock">
                 <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Skipass</div>
-                {hasPrice ? (
-                  <span style={{ fontWeight: 800, color: "#0f172a" }}>{fmtMoney(price, cur)}</span>
-                ) : (
-                  <span style={{ color: "#94a3b8" }}>—</span>
-                )}
-                {r.skipass_label ? (
+
+                {hasPrice ? <span style={{ fontWeight: 800, color: "#0f172a" }}>{fmtMoney(price, cur)}</span> : <span style={{ color: "#94a3b8" }}>—</span>}
+
+                {shortSkipassLabel(r.skipass_label) ? (
                   <div
                     style={{
                       marginTop: 2,
@@ -1214,10 +1098,11 @@ function ResortCards({
                       whiteSpace: "nowrap",
                       overflow: "hidden",
                       textOverflow: "ellipsis",
+                      maxWidth: "100%",
                     }}
-                    title={r.skipass_label}
+                    title={r.skipass_label ?? undefined}
                   >
-                    {r.skipass_label}
+                    {shortSkipassLabel(r.skipass_label)}
                   </div>
                 ) : null}
               </div>
@@ -1246,7 +1131,6 @@ function ResortCards({
               </div>
             </div>
 
-            {/* ✅ lokalny CSS tylko dla kart */}
             <style jsx>{`
               .cardBottomRow {
                 display: flex;
@@ -1254,11 +1138,12 @@ function ResortCards({
                 gap: 10px;
                 margin-top: 10px;
                 align-items: flex-end;
+                max-width: 100%;
               }
 
               .skipassBlock {
                 flex: 1;
-                min-width: 0;
+                min-width: 0; /* ✅ kluczowe dla ellipsis */
               }
 
               .updateBlock {
@@ -1267,7 +1152,9 @@ function ResortCards({
                 flex-direction: column;
                 align-items: flex-end;
                 gap: 4px;
-                min-width: 150px;
+
+                min-width: 0;
+                max-width: 48%;
               }
 
               .updateLabel {
@@ -1280,6 +1167,8 @@ function ResortCards({
                 align-items: center;
                 gap: 8px;
                 flex-wrap: nowrap;
+                min-width: 0;
+                max-width: 100%;
               }
 
               .updateDate {
@@ -1301,7 +1190,7 @@ function ResortCards({
 
                 .updateBlock {
                   align-items: flex-start;
-                  min-width: 0;
+                  max-width: 100%;
                   width: 100%;
                 }
 
@@ -1465,7 +1354,6 @@ const badgeStyle: React.CSSProperties = {
   padding: "0 6px",
 };
 
-// ✅ delikatny „link-button” zamiast ordynarnego CTA
 const ctaLinkBtnStyle: React.CSSProperties = {
   border: "1px solid transparent",
   background: "transparent",
