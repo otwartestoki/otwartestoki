@@ -1042,6 +1042,7 @@ function ResortCards({
         return (
           <div
             key={(r.id as any) ?? idx}
+            className="card"
             onClick={() => onOpenResort(r)}
             role="link"
             tabIndex={0}
@@ -1062,7 +1063,7 @@ function ResortCards({
           >
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 950, color: "#0f172a" }}>{r.name ?? "—"}</div>
+                <div style={{ fontWeight: 950, color: "#0f172a", lineHeight: 1.15 }}>{r.name ?? "—"}</div>
                 {subline ? (
                   <div style={{ marginTop: 2, color: "#94a3b8", fontSize: 12, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }} title={subline}>
                     {subline}
@@ -1070,10 +1071,13 @@ function ResortCards({
                 ) : null}
               </div>
 
-              <span style={statusPillStyle(s)}>
-                <span style={dotStyle(s)} />
-                {statusLabel(s)}
-              </span>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 }}>
+                <span style={statusPillStyle(s)}>
+                  <span style={dotStyle(s)} />
+                  {statusLabel(s)}
+                </span>
+                <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, textAlign: "right" }}>Dotknij, aby otworzyć</div>
+              </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
@@ -1115,6 +1119,7 @@ function ResortCards({
                     {upd ? fmtDateShort(upd) : "—"}
                   </div>
 
+                  {/* ✅ JEDYNY CTA na mobile */}
                   <button
                     type="button"
                     className="updateBtn"
@@ -1122,16 +1127,23 @@ function ResortCards({
                       e.stopPropagation();
                       onOpenResort(r);
                     }}
-                    style={ctaLinkBtnStyle}
-                    aria-label={`Zobacz ${r.name ?? "resort"}`}
+                    style={ctaMobileStyle}
+                    aria-label={`Szczegóły: ${r.name ?? "resort"}`}
                   >
-                    Zobacz →
+                    Szczegóły →
                   </button>
                 </div>
               </div>
             </div>
 
             <style jsx>{`
+              .card {
+                transition: transform 90ms ease, box-shadow 120ms ease;
+              }
+              .card:active {
+                transform: scale(0.99);
+              }
+
               .cardBottomRow {
                 display: flex;
                 justify-content: space-between;
@@ -1154,7 +1166,7 @@ function ResortCards({
                 gap: 4px;
 
                 min-width: 0;
-                max-width: 48%;
+                max-width: 52%;
               }
 
               .updateLabel {
@@ -1209,10 +1221,12 @@ function ResortCards({
 
 function MiniStat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div style={{ border: "1px solid #f1f5f9", borderRadius: 14, padding: 10, background: "#fbfdff" }}>
+    <div style={{ border: "1px solid #f1f5f9", borderRadius: 14, padding: 10, background: "#fbfdff", minWidth: 0 }}>
       <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.15 }}>{value}</div>
-      {sub ? <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{sub}</div> : null}
+      <div style={{ fontSize: 14, fontWeight: 900, color: "#0f172a", lineHeight: 1.15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {value}
+      </div>
+      {sub ? <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sub}</div> : null}
     </div>
   );
 }
@@ -1360,6 +1374,19 @@ const ctaLinkBtnStyle: React.CSSProperties = {
   padding: "4px 6px",
   borderRadius: 10,
   color: "#2563eb",
+  fontWeight: 900,
+  fontSize: 12,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  lineHeight: 1,
+};
+
+const ctaMobileStyle: React.CSSProperties = {
+  border: "1px solid #0f172a",
+  background: "#0f172a",
+  padding: "8px 10px",
+  borderRadius: 999,
+  color: "#ffffff",
   fontWeight: 900,
   fontSize: 12,
   cursor: "pointer",
