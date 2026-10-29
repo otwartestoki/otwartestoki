@@ -1,0 +1,5 @@
+"use client";
+/* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element */
+import {useState} from "react";
+import {api} from "../client";
+export default function Page(){const [error,setError]=useState(""),[busy,setBusy]=useState(false);return <section className="login"><img src="/baner.png" alt="Otwarte Stoki"/><h1>Panel administratora</h1><p>Zaloguj się kontem administratora Supabase.</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setError("");const form=new FormData(e.currentTarget);try{await api("login",{email:form.get("email"),password:form.get("password")});window.location.href="/admin";}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}><label>E-mail<input name="email" type="email" autoComplete="username" required/></label><label>Hasło<input name="password" type="password" autoComplete="current-password" required/></label>{error&&<p role="alert">{error}</p>}<button className="primary" disabled={busy}>{busy?"Loguję…":"Zaloguj się"}</button></form><a href="/">Wróć na otwartestoki.pl</a></section>;}

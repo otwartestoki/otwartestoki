@@ -1,0 +1,12 @@
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+export type Row = Record<string, Json>;
+export type Field = { key: string; label: string; type: string; required?: boolean; options?: string[] };
+export type TableSchema = { label: string; keys: string[]; title: string; resort?: string; fields: Field[] };
+export type Status = "open" | "closed" | "partial" | "unknown";
+export type Candidate = { source_id: string; source: string; resort_id: string; kind: "slope" | "lift"; name: string; number: string; status: Status; raw_status: Json; url: string; source_updated_at: string | null; fetched_at?: string; length_m?: Json; reason?: string; freshness?: string; warnings?: string[]; evidence?: Json };
+export type ReportObject = { db_id: string; resort_id: string; kind: "slope" | "lift"; number: Json; name: Json; sector?: Json; length_m: Json; db_status: Json; db_status_norm: Status; db_updated_at: string | null; db_record?: Row; observed_status: Status; match: string; candidates: Candidate[] };
+export type Resort = { id: string; name: string; url?: string; country?: Json; city?: Json; [key: string]: unknown };
+export type Report = { generated_at: string; counts: Record<string, number>; resorts: Resort[]; objects: ReportObject[]; sources?: Source[]; inventory?: Json[]; unmatched_source_objects?: Candidate[]; errors?: Json[] };
+export type Source = { id: string; resort_id: string; url: string; adapter: string; expected_station?: string; kind?: "slope" | "lift"; legacy?: string | null; force_kind?: "slope" | "lift" };
+export type ItemResult = { result: "applied" | "current" | "conflict" | "error" | "unverified"; message: string; record?: Row };
+export type Job = { id: string; report_id: string; created_at: string; state: string; total: number; counts: Record<string, number>; items: Row[] };
