@@ -2,7 +2,7 @@ import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { adminClient, dbFailure } from "./server";
 import { tableSchema } from "./schema";
-import { HttpError, recordIdentity, validateChanges } from "./validation";
+import { HttpError, normalizeStatus, recordIdentity, validateChanges } from "./validation";
 import type { Row } from "./types";
 import { utcTimestamp } from "../skiAvailability";
 
@@ -43,4 +43,39 @@ export async function saveRecord(table: string, token: string, input: unknown, u
   const {error:logError}=await db.from("admin_audit").update({state:verified?"verified":"unverified",after:current}).eq("id",audit.id);
   if(logError || !verified) throw new HttpError(502,"Zapis wysłany, ale potwierdzenie jest niepełne. Odczytaj wpis i sprawdź historię.");
   return {record:current,revision:revision(table,current)};
+}
+
+
+async function resortInventory(resortId: Row[string]) {
+  async function rows(table: "slopes" | "lifts") {
+    const all: Row[] = [];
+    for (let start = 0; start < 10000; start += 500) {
+      const { data, error } = await adminClient().from(table).select("*").eq("resort", resortId).order("id").range(start, start + 499);
+      if (error) dbFailure(error);
+      all.push(...data);
+      if (data.length < 500) return all;
+    }
+    throw new HttpError(413, "Zbyt wiele obiektów ośrodka.");
+  }
+  const [slopes, lifts] = await Promise.all([rows("slopes"), rows("lifts")]);
+  return { slopes, lifts };
+}
+
+// Bounded, resumable batches keep large resorts within the hosting request limit.
+// Every child write uses the same audit, CAS and readback as the single-record editor.
+export async function closeResortStep(token: string, userId: string) {
+  const before = decode(token, "resorts");
+  const current = await readRecord("resorts", { id: before.id });
+  if (Object.entries(before).some(([key, value]) => JSON.stringify(current[key]) !== JSON.stringify(value))) throw new HttpError(409, "Ośrodek zmienił się w bazie. Odśwież dane przed zamknięciem.");
+  const inventory = await resortInventory(before.id);
+  const pending = (["slopes", "lifts"] as const).flatMap(table => inventory[table].filter(row => normalizeStatus(row.status) !== "closed").map(row => ({ table, row })));
+  for (const { table, row } of pending.slice(0, 3)) await saveRecord(table, revision(table, row), { status: "zamknięta" }, userId);
+  const after = await resortInventory(before.id);
+  const remaining = [...after.slopes, ...after.lifts].filter(row => normalizeStatus(row.status) !== "closed").length;
+  if (remaining) return { complete: false as const, remaining, inventory: after };
+  // Confirm the resort only after every slope and lift has been read back as closed.
+  const saved = await saveRecord("resorts", token, { status: "zamknięty" }, userId, true);
+  const verified = await resortInventory(before.id);
+  if ([...verified.slopes, ...verified.lifts].some(row => normalizeStatus(row.status) !== "closed")) throw new HttpError(409, "Status obiektu zmienił się podczas zamykania. Odśwież bazę i ponów zamknięcie ośrodka.");
+  return { ...saved, complete: true as const, remaining: 0, inventory: verified };
 }

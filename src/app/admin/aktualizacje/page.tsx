@@ -8,6 +8,8 @@ import { publicSkiStatus, summarizeSlopes } from "@/lib/skiAvailability";
 import { buildReport, type Snapshot, type SourceResult } from "@/lib/admin/matching";
 import type { Candidate, ReportObject, Row, Status } from "@/lib/admin/types";
 
+type ResortConfirmation = { record?: Row; complete?: boolean; remaining?: number; inventory?: { slopes: Row[]; lifts: Row[] } };
+
 const labels: Record<Status, string> = { open: "otwarte", closed: "zamknięte", partial: "częściowo otwarte", unknown: "brak jednoznacznych danych" };
 const keyOf = (row: ReportObject) => `${row.kind}:${row.db_id}`;
 const date = (value: string | null | undefined) => value ? new Date(value).toLocaleString("pl-PL") : "brak daty";
@@ -131,14 +133,31 @@ function LiveStatuses() {
 
   async function confirmResort(resort: Row, status: "otwarty" | "zamknięty") {
     if (busy) return;
-    setPhase("save"); setMessage("Potwierdzam status narciarski ośrodka…");
+    setPhase("save"); stop.current = false; setMessage("Potwierdzam status narciarski ośrodka…");
     try {
       const current = await api("record", { table: "resorts", identity: { id: resort.id } });
       if (Object.entries(resort).some(([key, value]) => JSON.stringify(current.record[key]) !== JSON.stringify(value))) throw new Error("Ośrodek zmienił się od odczytu strony. Odśwież bazę i sprawdź status ponownie.");
-      const saved = await api("confirm-resort", { revision: current.revision, status });
-      setSnapshot(old => old ? { ...old, resorts: old.resorts.map(row => row.id === resort.id ? saved.record : row) } : old);
-      setMessage("Potwierdzono status ośrodka w bazie. Strona główna pokaże go po odświeżeniu, z uwzględnieniem dostępności tras.");
-    } catch (error) { setMessage((error as Error).message); }
+      let previousRemaining = Infinity;
+      while (true) {
+        const saved = await api<ResortConfirmation>("confirm-resort", { revision: current.revision, status });
+        const record = saved.record, inventory = saved.inventory;
+        setSnapshot(old => old ? { ...old,
+          resorts: record ? old.resorts.map(row => row.id === resort.id ? record : row) : old.resorts,
+          slopes: inventory ? [...old.slopes.filter(row => row.resort !== resort.id), ...inventory.slopes] : old.slopes,
+          lifts: inventory ? [...old.lifts.filter(row => row.resort !== resort.id), ...inventory.lifts] : old.lifts,
+        } : old);
+        if (status !== "zamknięty" || saved.complete) break;
+        if (stop.current) throw new Error("Zatrzymano na żądanie.");
+        if (saved.remaining === undefined || saved.remaining >= previousRemaining) throw new Error("Statusy zmieniają się podczas operacji. Odśwież dane i sprawdź historię.");
+        previousRemaining = saved.remaining;
+        setMessage(`Zamykam trasy i wyciągi: pozostało ${saved.remaining}. Nie zamykaj strony…`);
+      }
+      if (status === "zamknięty") setResults(old => old.filter(result => result.source.resort_id !== resort.id));
+      setMessage(status === "zamknięty" ? "Zamknięto ośrodek oraz wszystkie jego trasy i wyciągi. Sprawdzono zapis w bazie." : "Potwierdzono narciarskie otwarcie ośrodka.");
+    } catch (error) {
+      try { setSnapshot(await api<Snapshot>("snapshot")); } catch { /* Keep the last confirmed snapshot if refreshing fails. */ }
+      setMessage(status === "zamknięty" ? `Zamykanie nie zostało zakończone. Część wpisów mogła zostać zapisana. ${(error as Error).message} Ponów zamknięcie, aby dokończyć pozostałe wpisy.` : (error as Error).message);
+    }
     finally { setPhase("idle"); }
   }
 
@@ -189,7 +208,7 @@ function LiveStatuses() {
             <p>Status ośrodka w bazie: <b>{String(resort.status || "brak")}</b> · sprawdzony: {date(typeof resort.last_checked_at === "string" ? resort.last_checked_at : null)}</p>
             <p>Na stronie głównej: <b>{publicSkiStatus(resort.status, typeof resort.last_checked_at === "string" ? resort.last_checked_at : null, skiing.get(id)) === "open" ? "Otwarte" : publicSkiStatus(resort.status, typeof resort.last_checked_at === "string" ? resort.last_checked_at : null, skiing.get(id)) === "closed" ? "Zamknięte" : "Do weryfikacji"}</b>. Brak otwartych tras i komplet zamkniętych oznacza zamknięcie narciarskie; otwarcie wymaga potwierdzenia z ostatnich 72 godzin.</p>
             <div className="toolbar">
-              <button className="accept-change" disabled={busy} onClick={() => confirmResort(resort, "zamknięty")}>Potwierdź zamknięcie ośrodka</button>
+              <button className="accept-change" disabled={busy} onClick={() => confirmResort(resort, "zamknięty")}>Zamknij ośrodek, wszystkie trasy i wyciągi</button>
               <button disabled={busy || !skiing.get(id)?.open} onClick={() => confirmResort(resort, "otwarty")}>Potwierdź narciarskie otwarcie</button>
             </div>
             {safeUrl(resort.url) && <p><a href={safeUrl(resort.url)} target="_blank" rel="noreferrer">Otwórz stronę ośrodka ↗</a></p>}
