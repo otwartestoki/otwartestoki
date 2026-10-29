@@ -94,3 +94,31 @@
   .admin .status-table td:first-child { background: #fafcff; }
   .admin .accept-change { width: 100%; }
 }
+
+.admin .source-comparison { margin-top: 12px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 12px; min-width: 0; }
+.admin .source-object-name { display: block; font-weight: 800; overflow-wrap: anywhere; }
+.admin .field-comparison { margin: 10px 0; font-size: 12px; }
+.admin .comparison-heading, .admin .comparison-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) minmax(0, 1fr); }
+.admin .comparison-heading { color: #64748b; background: #fafcff; font-size: 11px; font-weight: 700; }
+.admin .comparison-heading > span, .admin .comparison-row > span { padding: 6px; overflow-wrap: anywhere; }
+.admin .comparison-row { border-top: 1px solid #e2e8f0; }
+.admin .comparison-row > [role=rowheader] { color: #64748b; font-size: 11px; }
+.admin .comparison-source { font-weight: 700; border-radius: 4px; }
+.admin .comparison-source.same, .admin .comparison-summary.same { color: #166534; background: #f0fdf4; }
+.admin .comparison-source.different, .admin .comparison-summary.different { color: #991b1b; background: #fef2f2; }
+.admin .comparison-source.missing, .admin .comparison-summary.missing { color: #64748b; background: #f8fafc; }
+.admin .comparison-summary { display: inline-block; padding: 4px 10px; border-radius: 999px; font-weight: 800; font-size: 12px; }
+.admin .comparison-symbol { font-weight: 900; }
+.admin .comparison-raw { overflow-wrap: anywhere; margin-bottom: 4px; }
+.admin .comparison-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; }
+.admin .comparison-legend .same { color: #166534; }
+.admin .comparison-legend .different { color: #991b1b; }
+.admin .comparison-legend .missing { color: #64748b; }
+.admin .status-table th:first-child { width: 21%; }
+.admin .status-table th:nth-child(3) { width: 45%; }
+.admin .accept-change { white-space: normal; }
+@media (max-width: 650px) {
+  .admin .source-comparison { padding: 10px; }
+  .admin .comparison-heading, .admin .comparison-row { grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr); }
+  .admin .comparison-heading > span, .admin .comparison-row > span { padding: 6px 4px; }
+}
