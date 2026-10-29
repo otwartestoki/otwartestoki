@@ -4,6 +4,7 @@ import { api, Shell } from "../client";
 import SourceComparison from "./SourceComparison";
 import { sourceFieldValue, type WritableSourceField } from "@/lib/admin/comparison";
 import { changed } from "@/lib/admin/validation";
+import { publicSkiStatus, summarizeSlopes } from "@/lib/skiAvailability";
 import { buildReport, type Snapshot, type SourceResult } from "@/lib/admin/matching";
 import type { Candidate, ReportObject, Row, Status } from "@/lib/admin/types";
 
@@ -29,6 +30,7 @@ function LiveStatuses() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const stop = useRef(false);
   const busy = phase !== "idle";
+  const skiing = useMemo(() => summarizeSlopes(snapshot?.slopes.map(row => ({ resort: String(row.resort), status: typeof row.status === "string" ? row.status : null })) || []), [snapshot]);
   const report = useMemo(() => snapshot ? buildReport(snapshot, results) : null, [snapshot, results]);
 
   useEffect(() => {
@@ -127,6 +129,19 @@ function LiveStatuses() {
     } finally { setActiveField(null); setPhase("idle"); }
   }
 
+  async function confirmResort(resort: Row, status: "otwarty" | "zamknięty") {
+    if (busy) return;
+    setPhase("save"); setMessage("Potwierdzam status narciarski ośrodka…");
+    try {
+      const current = await api("record", { table: "resorts", identity: { id: resort.id } });
+      if (Object.entries(resort).some(([key, value]) => JSON.stringify(current.record[key]) !== JSON.stringify(value))) throw new Error("Ośrodek zmienił się od odczytu strony. Odśwież bazę i sprawdź status ponownie.");
+      const saved = await api("confirm-resort", { revision: current.revision, status });
+      setSnapshot(old => old ? { ...old, resorts: old.resorts.map(row => row.id === resort.id ? saved.record : row) } : old);
+      setMessage("Potwierdzono status ośrodka w bazie. Strona główna pokaże go po odświeżeniu, z uwzględnieniem dostępności tras.");
+    } catch (error) { setMessage((error as Error).message); }
+    finally { setPhase("idle"); }
+  }
+
   const visible = report?.objects.filter(row => (!resortId || row.resort_id === resortId) && (!search || `${row.name || ""} ${row.number || ""} ${snapshot?.resorts.find(r => r.id === row.resort_id)?.name}`.toLocaleLowerCase("pl").includes(search.toLocaleLowerCase("pl"))) && (filter === "changes" ? changed(row) : filter === "issues" ? !row.candidates.length || row.observed_status === "unknown" || row.match !== "propozycja do zatwierdzenia" : true)) || [];
   const proposed = report?.objects.filter(changed) || [];
   const eligible = visible.filter(changed);
@@ -158,6 +173,7 @@ function LiveStatuses() {
       </div>
       {results.length > 0 && <p className="comparison-legend"><span className="same">✓ Zielone — zgodne dane</span><span className="different">≠ Czerwone — różnice</span><span className="missing">— Szare — brak danych do porównania</span></p>}
       {!results.length && phase !== "scan" && <p>Widzisz wartości zapisane w bazie. Kliknij „Sprawdź źródła”, aby pobrać propozycje z internetu. Samo sprawdzanie nie zmienia bazy.</p>}
+      {results.length > 0 && <p className="source-warning">Bez dopasowania do źródeł: {report.objects.filter(row => !row.candidates.length).length} obiektów. Akceptacja propozycji nie aktualizuje tych wpisów.</p>}
       {!groups.length && <p>Brak wpisów spełniających wybrane filtry.</p>}
       <div className="records">{groups.map(resort => {
         const id = String(resort.id), rows = visible.filter(r => r.resort_id === id), sources = snapshot.sources.filter(s => s.resort_id === id), checked = results.filter(r => r.source.resort_id === id), differences = rows.filter(changed), extras = report.unmatched_source_objects?.filter(o => o.resort_id === id) || [];
@@ -165,6 +181,11 @@ function LiveStatuses() {
           <summary><strong>{String(resort.name)}</strong><span>{String(resort.status || "brak statusu")} · {rows.length} obiektów · {differences.length} propozycji</span></summary>
           <div className="resort-status-body">
             <p>Status ośrodka w bazie: <b>{String(resort.status || "brak")}</b> · sprawdzony: {date(typeof resort.last_checked_at === "string" ? resort.last_checked_at : null)}</p>
+            <p>Na stronie głównej: <b>{publicSkiStatus(resort.status, typeof resort.last_checked_at === "string" ? resort.last_checked_at : null, skiing.get(id)) === "open" ? "Otwarte" : publicSkiStatus(resort.status, typeof resort.last_checked_at === "string" ? resort.last_checked_at : null, skiing.get(id)) === "closed" ? "Zamknięte" : "Do weryfikacji"}</b>. Brak otwartych tras i komplet zamkniętych oznacza zamknięcie narciarskie; otwarcie wymaga potwierdzenia z ostatnich 72 godzin.</p>
+            <div className="toolbar">
+              <button className="accept-change" disabled={busy} onClick={() => confirmResort(resort, "zamknięty")}>Potwierdź zamknięcie ośrodka</button>
+              <button disabled={busy || !skiing.get(id)?.open} onClick={() => confirmResort(resort, "otwarty")}>Potwierdź narciarskie otwarcie</button>
+            </div>
             {safeUrl(resort.url) && <p><a href={safeUrl(resort.url)} target="_blank" rel="noreferrer">Otwórz stronę ośrodka ↗</a></p>}
             {!sources.length ? <p className="source-warning">Brak przypisanego automatycznego źródła. Obiekty pozostają widoczne w bazie; sprawdź stronę ośrodka ręcznie.</p> : <p>Sprawdzono {checked.length} z {sources.length} przypisanych źródeł.</p>}
             {checked.map(r => <div className={r.error ? "source-warning" : "source-result"} key={r.source.id}><a href={r.source.url} target="_blank" rel="noreferrer">{new URL(r.source.url).hostname} ↗</a> · {r.error || `${r.observations.length} odczytanych obiektów`}<small>Pobrano: {date(r.fetched_at)}</small>{r.station && <p>Deklaracja stacji w źródle: {r.station.raw ? "otwarta" : "zamknięta"}. {r.station.note}</p>}</div>)}
