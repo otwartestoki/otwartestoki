@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {createRequire} from 'node:module';
+import {execFileSync} from 'node:child_process';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const dir=mkdtempSync(join(tmpdir(),'stoki-validation-'));
+execFileSync(process.execPath,['node_modules/typescript/bin/tsc','src/lib/admin/validation.ts','src/lib/admin/types.ts','src/lib/admin/schema.ts','--outDir',dir,'--module','commonjs','--target','es2020','--skipLibCheck'],{stdio:'inherit'});
+const require=createRequire(import.meta.url);
+const v=require(join(dir,'validation.js'));
+const {TABLES}=require(join(dir,'schema.js'));
+test('administrator requires an exact confirmed allowlisted email',()=>{assert.equal(v.allowlisted('admin@example.org',true,' ADMIN@example.org '),true);assert.equal(v.allowlisted('other@example.org',true,'admin@example.org'),false);assert.equal(v.allowlisted('admin@example.org',false,'admin@example.org'),false);assert.equal(v.allowlisted('admin@example.org',true,undefined),false);});
+test('identity supports integer IDs and composite skipass keys only',()=>{assert.deepEqual(v.recordIdentity(TABLES.slopes,{id:42}),{id:42});assert.throws(()=>v.recordIdentity(TABLES.slopes,{id:42,status:'open'}));assert.throws(()=>v.recordIdentity(TABLES.skipass_coverage,{resort_id:'a'}));assert.deepEqual(v.recordIdentity(TABLES.skipass_coverage,{resort_id:'a',skipass_product_id:'b'}),{resort_id:'a',skipass_product_id:'b'});});
+test('reject primary key, SQL fields, invalid values and unsafe URLs',()=>{const before={id:42,name:'Test',status:'otwarta',length_m:100};assert.throws(()=>v.validateChanges(TABLES.slopes,{id:43},before));assert.throws(()=>v.validateChanges(TABLES.slopes,{status:'something'},before));assert.throws(()=>v.validateChanges(TABLES.slopes,{length_m:-1},before));assert.deepEqual(v.validateChanges(TABLES.slopes,{status:'zamknięta'},before),{status:'zamknięta'});assert.throws(()=>v.validateChanges(TABLES.resorts,{url:'javascript:alert(1)'},{url:null}));});
+test('unknown or ambiguous observation is never an eligible status change',()=>{assert.equal(v.changed({match:'propozycja do zatwierdzenia',observed_status:'unknown',db_status_norm:'open'}),false);assert.equal(v.changed({match:'niejednoznaczne',observed_status:'closed',db_status_norm:'open'}),false);assert.equal(v.changed({match:'propozycja do zatwierdzenia',observed_status:'closed',db_status_norm:'open'}),true);assert.equal(v.normalizeStatus(null),'unknown');});
+process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
