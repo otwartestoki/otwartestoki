@@ -4,7 +4,7 @@ Panel jest częścią tej samej aplikacji Next.js. Adresy po wdrożeniu:
 
 - `/admin/login` — logowanie przez Supabase Auth (e-mail i hasło).
 - `/admin/baza` — edycja istniejących wpisów w sześciu tabelach.
-- `/admin/aktualizacje` — import `coverage.json`, porównanie z aktualną bazą, akceptacja statusów.
+- `/admin/aktualizacje` — automatyczny odczyt bazy, sprawdzanie stron źródłowych, akceptacja statusów.
 - `/admin/historia` — ostatnie 200 zapisów i ich wynik.
 
 ## Konfiguracja
@@ -25,9 +25,13 @@ Sekretów nie dodawaj do zmiennych z prefiksem `NEXT_PUBLIC_`, kodu ani GitHub. 
 
 ## Raport i zapisy
 
-Na stronie aktualizacji wczytaj plik `coverage.json` wygenerowany dotychczasowym audytem. Raport pozostaje w pamięci przeglądarki; odświeżenie strony wymaga ponownego wczytania. Nie publikujemy kopii bazy w publicznym repozytorium. Ta wersja nie uruchamia kolektora stron automatycznie na Vercel — dotychczasowy audyt nadal generuje raport lokalnie.
+Strona aktualizacji automatycznie odczytuje wszystkie ośrodki, trasy i wyciągi z Supabase. Nie wymaga plików JSON. „Sprawdź źródła” ponownie odczytuje bazę, a następnie pobiera przypisane strony/API ze statycznego katalogu `src/lib/admin/source-catalog.json`. Można sprawdzić wszystkie ośrodki albo wybrać jeden. Kolektor działa na serwerze Vercel, po dwa źródła jednocześnie, z limitem 10 sekund i 3 MB na źródło. Nie korzysta z modelu AI ani tokenów OpenAI.
 
-Każda zaakceptowana propozycja jest osobnym żądaniem do serwera. Panel odczytuje aktualny status i datę wpisu, porównuje je z raportem, zapisuje i ponownie odczytuje wynik. Zatrzymuje kolejkę po pierwszym błędzie. Zamknięcie karty zatrzymuje dalsze przetwarzanie; wykonane operacje pozostają w historii w Supabase. Ponowne wczytanie raportu i odczyt bazy pozwalają sprawdzić postęp. Status już zgodny z propozycją nie powoduje kolejnego zapisu.
+Wyniki pojawiają się podczas sprawdzania. Widoczne są status z bazy, odczyt źródła, adres, data danych (jeżeli podana), czas pobrania i ewentualny błąd. Wszystkie obiekty z bazy pozostają widoczne, także bez automatycznego źródła. Brak danych, nieznany kod i błąd sieci nie oznaczają zamknięcia. Status ośrodka nie jest wyliczany z otwartej kolei turystycznej; deklaracja stacji w źródle jest informacją do ręcznej oceny. Dopasowania wieloznaczne lub współdzielone nie mogą być automatyczną propozycją.
+
+Każda zaakceptowana propozycja jest osobnym żądaniem do serwera. Panel porównuje bieżący status i datę wpisu ze stanem odczytanym przed sprawdzeniem źródeł, zapisuje i ponownie odczytuje wynik. Zatrzymuje zapis po pierwszym błędzie. Sprawdzanie internetu samo nie zmienia bazy. Zamknięcie karty zatrzymuje kolejne operacje; potwierdzenia zapisów pozostają w historii Supabase. Wyniki sprawdzania stron są w pamięci karty — po odświeżeniu uruchom sprawdzanie ponownie. Status już zgodny z propozycją nie powoduje kolejnego zapisu.
+
+Nowe ośrodki z bazy pojawiają się automatycznie; nowe formaty stron wymagają dodania źródła i parsera. Przekierowanie poza domenę przypisanego źródła jest blokowane. Kolektor nie omija blokad HTTP ani logowania. Nie wszystkie źródła podają datę; brak daty jest widoczny bez dodatkowego obowiązkowego potwierdzenia.
 
 Edycja ogólna używa podpisanej, godzinnej wersji rekordu i porównuje poprzednie wartości przy zapisie. Konflikt wymaga ponownego odczytu. Historia `prepared` lub `unverified` oznacza konieczność sprawdzenia aktualnego wpisu; nie należy zakładać, że żądanie zakończone błędem nie zapisało danych. Panel edytuje istniejące wpisy; nie dodaje ani nie usuwa rekordów.
 
