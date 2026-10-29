@@ -8,7 +8,7 @@ import {join} from 'node:path';
 const dir=mkdtempSync(join(tmpdir(),'stoki-comparison-'));
 execFileSync(process.execPath,['node_modules/typescript/bin/tsc','src/lib/admin/comparison.ts','--outDir',dir,'--module','commonjs','--target','es2020','--skipLibCheck'],{stdio:'inherit'});
 const require=createRequire(import.meta.url);
-const {compareCandidate,metres}=require(join(dir,'comparison.js'));
+const {compareCandidate,metres,sourceFieldValue}=require(join(dir,'comparison.js'));
 const db={kind:'slope',number:'4/1',name:'Niebieska',length_m:1200,db_status:'otwarta',db_status_norm:'open'};
 const source={kind:'slope',number:'4/1',name:'NIEBIESKA',length_m:'1,2 km',status:'open'};
 const fields=(a=db,b=source)=>Object.fromEntries(compareCandidate(a,b).map(f=>[f.label,f]));
@@ -17,4 +17,8 @@ test('different name, code, length and status are red independently of automatic
 test('missing data and unknown statuses are neutral and never false agreements',()=>{const f=fields({...db,name:null},{...source,number:'',length_m:null,status:'unknown'});for(const key of ['Numer / kod','Nazwa','Długość','Status'])assert.equal(f[key].state,'missing');assert.equal(f.Nazwa.database,'brak danych');});
 test('a generic prefix is displayed as a real name difference',()=>{assert.equal(fields(db,{...source,name:'Trasa Niebieska'}).Nazwa.state,'different');});
 test('ambiguous measurements and ranges are not treated as matching lengths',()=>{assert.equal(metres('600 / 700 m'),null);assert.equal(metres('1200–1300 m'),null);assert.equal(metres('1 200 m'),1200);assert.equal(metres(0),null);assert.equal(fields(db,{...source,length_m:'1200–1300 m'})['Długość'].state,'missing');});
+test('source field writes use the selected value and convert only explicit valid measurements',()=>{assert.equal(sourceFieldValue('name',source),'NIEBIESKA');assert.equal(sourceFieldValue('number',source),'4/1');assert.equal(sourceFieldValue('length_m',source),1200);assert.equal(sourceFieldValue('length_m',{...source,length_m:'1–2 km'}),undefined);assert.equal(sourceFieldValue('length_m',{...source,length_m:'999999 km'}),undefined);});
+test('missing source values never clear a database value',()=>{assert.equal(sourceFieldValue('name',{...source,name:''}),undefined);assert.equal(sourceFieldValue('number',{...source,number:null}),undefined);assert.equal(sourceFieldValue('length_m',{...source,length_m:null}),undefined);});
+test('only known open and closed source statuses can be written',()=>{assert.equal(sourceFieldValue('status',source),'otwarta');assert.equal(sourceFieldValue('status',{...source,status:'closed'}),'zamknięta');assert.equal(sourceFieldValue('status',{...source,status:'unknown'}),undefined);assert.equal(sourceFieldValue('status',{...source,status:'partial'}),undefined);});
+test('object category, identity and unknown fields cannot be copied',()=>{for(const key of ['kind','id','resort','updated_at','created_at'])assert.equal(sourceFieldValue(key,source),undefined);});
 process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));

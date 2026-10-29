@@ -2,9 +2,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, Shell } from "../client";
 import SourceComparison from "./SourceComparison";
+import { sourceFieldValue, type WritableSourceField } from "@/lib/admin/comparison";
 import { changed } from "@/lib/admin/validation";
 import { buildReport, type Snapshot, type SourceResult } from "@/lib/admin/matching";
-import type { ReportObject, Row, Status } from "@/lib/admin/types";
+import type { Candidate, ReportObject, Row, Status } from "@/lib/admin/types";
 
 const labels: Record<Status, string> = { open: "otwarte", closed: "zamknięte", partial: "częściowo otwarte", unknown: "brak jednoznacznych danych" };
 const keyOf = (row: ReportObject) => `${row.kind}:${row.db_id}`;
@@ -17,6 +18,8 @@ function LiveStatuses() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [results, setResults] = useState<SourceResult[]>([]);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [activeField, setActiveField] = useState<{ object: string; source: string; field: WritableSourceField } | null>(null);
+  const [fieldReceipts, setFieldReceipts] = useState<Record<string, Partial<Record<WritableSourceField, string>>>>({});
   const [receipts, setReceipts] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<"idle" | "read" | "scan" | "save">("read");
   const [message, setMessage] = useState("");
@@ -36,13 +39,13 @@ function LiveStatuses() {
 
   async function read() {
     setPhase("read"); setMessage("");
-    try { const data = await api<Snapshot>("snapshot"); setSnapshot(data); setResults([]); setReceipts({}); setProgress({ done: 0, total: 0 }); setMessage("Odczytano aktualny stan Supabase."); }
+    try { const data = await api<Snapshot>("snapshot"); setSnapshot(data); setResults([]); setReceipts({}); setFieldReceipts({}); setProgress({ done: 0, total: 0 }); setMessage("Odczytano aktualny stan Supabase."); }
     catch (e) { setMessage((e as Error).message); }
     finally { setPhase("idle"); }
   }
 
   async function scan() {
-    setPhase("scan"); stop.current = false; setMessage("Odczytuję aktualny stan bazy przed sprawdzeniem stron…"); setReceipts({}); setResults([]);
+    setPhase("scan"); stop.current = false; setMessage("Odczytuję aktualny stan bazy przed sprawdzeniem stron…"); setReceipts({}); setFieldReceipts({}); setResults([]);
     try {
       const data = await api<Snapshot>("snapshot"); setSnapshot(data);
       const sources = data.sources.filter(s => !resortId || s.resort_id === resortId);
@@ -95,6 +98,35 @@ function LiveStatuses() {
     } finally { setPhase("idle"); setSavingKey(null); }
   }
 
+  async function saveSourceField(row: ReportObject, candidate: Candidate, field: WritableSourceField) {
+    if (busy) return;
+    const value = sourceFieldValue(field, candidate);
+    if (value === undefined || candidate.kind !== row.kind || candidate.resort_id !== row.resort_id) return;
+    const table = row.kind === "slope" ? "slopes" : "lifts", key = keyOf(row), receiptKey = `${key}:${candidate.source_id}`;
+    setPhase("save"); setActiveField({ object: key, source: candidate.source_id, field });
+    setMessage(`Zapisuję ${field === "name" ? "nazwę" : field === "number" ? "numer / kod" : field === "length_m" ? "długość" : "status"} ze źródła: ${String(value)}…`);
+    setFieldReceipts(old => ({ ...old, [receiptKey]: { ...old[receiptKey], [field]: "" } }));
+    try {
+      const current = await api("record", { table, identity: { id: Number(row.db_id) } });
+      // Compare the displayed snapshot before using the server-signed, fresh revision.
+      if (!row.db_record || Object.entries(row.db_record).some(([key, value]) => JSON.stringify(current.record[key]) !== JSON.stringify(value))) {
+        throw new Error("Wpis zmienił się od odczytu strony. Odśwież bazę i porównaj dane ponownie.");
+      }
+      const saved = await api("save", { table, revision: current.revision, changes: { [field]: value } });
+      setSnapshot(old => {
+        if (!old) return old;
+        const collection = row.kind === "slope" ? "slopes" : "lifts";
+        return { ...old, [collection]: old[collection].map(record => String(record.id) === row.db_id ? saved.record : record) };
+      });
+      setFieldReceipts(old => ({ ...old, [receiptKey]: { ...old[receiptKey], [field]: "Zapisano i sprawdzono w bazie." } }));
+      setMessage("Wartość ze źródła zapisana i potwierdzona w bazie.");
+    } catch (error) {
+      const message = (error as Error).message;
+      setFieldReceipts(old => ({ ...old, [receiptKey]: { ...old[receiptKey], [field]: message } }));
+      setMessage(message);
+    } finally { setActiveField(null); setPhase("idle"); }
+  }
+
   const visible = report?.objects.filter(row => (!resortId || row.resort_id === resortId) && (!search || `${row.name || ""} ${row.number || ""} ${snapshot?.resorts.find(r => r.id === row.resort_id)?.name}`.toLocaleLowerCase("pl").includes(search.toLocaleLowerCase("pl"))) && (filter === "changes" ? changed(row) : filter === "issues" ? !row.candidates.length || row.observed_status === "unknown" || row.match !== "propozycja do zatwierdzenia" : true)) || [];
   const proposed = report?.objects.filter(changed) || [];
   const eligible = visible.filter(changed);
@@ -122,7 +154,7 @@ function LiveStatuses() {
       </div>
       <div className="toolbar">
         <button className="primary" disabled={busy || !eligible.length} onClick={() => save(eligible)}>Akceptuj i zapisz widoczne ({eligible.length})</button>
-        <small>Porównaj dane obiektu. Przycisk przy propozycji potwierdza dopasowanie i zapisuje status.</small>
+        <small>„← Do bazy” zapisuje tylko wybrane pole ze źródła. „Potwierdź i zapisz status” zatwierdza zmianę statusu obiektu.</small>
       </div>
       {results.length > 0 && <p className="comparison-legend"><span className="same">✓ Zielone — zgodne dane</span><span className="different">≠ Czerwone — różnice</span><span className="missing">— Szare — brak danych do porównania</span></p>}
       {!results.length && phase !== "scan" && <p>Widzisz wartości zapisane w bazie. Kliknij „Sprawdź źródła”, aby pobrać propozycje z internetu. Samo sprawdzanie nie zmienia bazy.</p>}
@@ -138,7 +170,7 @@ function LiveStatuses() {
             {checked.map(r => <div className={r.error ? "source-warning" : "source-result"} key={r.source.id}><a href={r.source.url} target="_blank" rel="noreferrer">{new URL(r.source.url).hostname} ↗</a> · {r.error || `${r.observations.length} odczytanych obiektów`}<small>Pobrano: {date(r.fetched_at)}</small>{r.station && <p>Deklaracja stacji w źródle: {r.station.raw ? "otwarta" : "zamknięta"}. {r.station.note}</p>}</div>)}
             <div className="status-table-wrap"><table className="status-table"><thead><tr><th>Obiekt</th><th>Aktualnie w bazie</th><th>Odczyt ze źródła</th><th>Akceptacja</th></tr></thead><tbody>{rows.map(row => {
               const key = keyOf(row);
-              return <tr key={key}><td data-label="Obiekt"><small>{row.kind === "slope" ? "Trasa" : "Wyciąg"}</small><strong>{String(row.number || "")} {String(row.name || "bez nazwy")}</strong>{row.sector && <small>Sektor: {String(row.sector)}</small>}</td><td data-label="Aktualnie w bazie"><span className={`status-pill ${row.db_status_norm}`}>{String(row.db_status || "brak")}</span><small>{date(row.db_updated_at)}</small></td><td data-label="Odczyt ze źródła">{row.candidates.length ? <><span className={`comparison-summary ${row.observed_status === "unknown" || row.db_status_norm === "unknown" ? "missing" : row.observed_status === row.db_status_norm ? "same" : "different"}`}>{labels[row.observed_status]}</span>{row.match !== "propozycja do zatwierdzenia" && <small>{row.match}</small>}{row.candidates.map((candidate, i) => <SourceComparison row={row} candidate={candidate} key={`${candidate.source_id}:${i}`} />)}</> : <small>{checked.length ? "Brak dopasowania — sprawdź ręcznie" : "Jeszcze nie sprawdzono"}</small>}</td><td data-label="Akceptacja">{changed(row) ? <button className="accept-change" disabled={busy} onClick={() => save([row])} aria-label={`Potwierdź dopasowanie i zapisz status: ${String(row.name || row.number)}`}>{savingKey === key ? "Zapisuję…" : "Potwierdź i zapisz status"}</button> : <small>{row.candidates.length && row.db_status_norm === row.observed_status ? "Zgodne z bazą" : "—"}</small>}{receipts[key] && <p role="status">{receipts[key]}</p>}</td></tr>;
+              return <tr key={key}><td data-label="Obiekt"><small>{row.kind === "slope" ? "Trasa" : "Wyciąg"}</small><strong>{String(row.number || "")} {String(row.name || "bez nazwy")}</strong>{row.sector && <small>Sektor: {String(row.sector)}</small>}</td><td data-label="Aktualnie w bazie"><span className={`status-pill ${row.db_status_norm}`}>{String(row.db_status || "brak")}</span><small>{date(row.db_updated_at)}</small></td><td data-label="Odczyt ze źródła">{row.candidates.length ? <><span className={`comparison-summary ${row.observed_status === "unknown" || row.db_status_norm === "unknown" ? "missing" : row.observed_status === row.db_status_norm ? "same" : "different"}`}>{labels[row.observed_status]}</span>{row.match !== "propozycja do zatwierdzenia" && <small>{row.match}</small>}{row.candidates.map((candidate, i) => <SourceComparison row={row} candidate={candidate} key={`${candidate.source_id}:${i}`} busy={busy} savingField={activeField?.object === key && activeField.source === candidate.source_id ? activeField.field : null} fieldMessages={fieldReceipts[`${key}:${candidate.source_id}`]} onUseField={field => saveSourceField(row, candidate, field)} />)}</> : <small>{checked.length ? "Brak dopasowania — sprawdź ręcznie" : "Jeszcze nie sprawdzono"}</small>}</td><td data-label="Akceptacja">{changed(row) ? <button className="accept-change" disabled={busy} onClick={() => save([row])} aria-label={`Potwierdź dopasowanie i zapisz status: ${String(row.name || row.number)}`}>{savingKey === key ? "Zapisuję…" : "Potwierdź i zapisz status"}</button> : <small>{row.candidates.length && row.db_status_norm === row.observed_status ? "Zgodne z bazą" : "—"}</small>}{receipts[key] && <p role="status">{receipts[key]}</p>}</td></tr>;
             })}</tbody></table></div>
             {extras.length > 0 && <details><summary>Obiekty źródłowe bez dopasowania w bazie ({extras.length})</summary>{extras.map((o, i) => <p key={i}>{o.kind === "slope" ? "Trasa" : "Wyciąg"} {o.number} {o.name} · {labels[o.status]} · <a href={o.url} target="_blank" rel="noreferrer">źródło ↗</a></p>)}</details>}
           </div>
