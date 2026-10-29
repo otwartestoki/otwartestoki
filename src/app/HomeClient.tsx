@@ -227,7 +227,7 @@ export default function HomeClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [globalStatsUpdatedAt, setGlobalStatsUpdatedAt] = useState<string | null>(null);
+  const [globalDataUpdatedAt, setGlobalDataUpdatedAt] = useState<string | null>(null);
   const [tiles, setTiles] = useState<{ open: number; closed: number; unknown: number }>({ open: 0, closed: 0, unknown: 0 });
 
   const [q, setQ] = useState("");
@@ -315,21 +315,21 @@ export default function HomeClient() {
   // ✅ slider: maksymalnie 3 km na pełną szerokość ekranu
   const maxOpenKmForSlider = 3;
 
-  async function loadGlobalStatsUpdatedAt() {
+  async function loadGlobalDataUpdatedAt() {
     const { data, error } = await supabase
       .from("resorts_public_list")
-      .select("stats_updated_at")
-      .not("stats_updated_at", "is", null)
-      .order("stats_updated_at", { ascending: false })
+      .select("resort_updated_at")
+      .not("resort_updated_at", "is", null)
+      .order("resort_updated_at", { ascending: false })
       .limit(1);
 
     if (error) {
-      console.warn("[loadGlobalStatsUpdatedAt]", error);
-      setGlobalStatsUpdatedAt(null);
+      console.warn("[loadGlobalDataUpdatedAt]", error);
+      setGlobalDataUpdatedAt(null);
       return;
     }
 
-    setGlobalStatsUpdatedAt((data as any)?.[0]?.stats_updated_at ?? null);
+    setGlobalDataUpdatedAt((data as any)?.[0]?.resort_updated_at ?? null);
   }
 
   // ✅ Tiles (Otwarte/Zamknięte) liczymy na podstawie przefiltrowanych wyników w `load()`
@@ -528,7 +528,7 @@ export default function HomeClient() {
   }, [page, q, difficulty, kidsTapeOnly, sortKey, minOpenKm, regionFilter, countryFilter]);
 
   useEffect(() => {
-    loadGlobalStatsUpdatedAt();
+    loadGlobalDataUpdatedAt();
   }, []);
 
   const resortUpdateTs = (r: ResortRow) => r.resort_updated_at ?? null;
@@ -550,7 +550,7 @@ export default function HomeClient() {
   return (
     <div style={{ minHeight: "100vh", background: "#ffffff", fontFamily: "system-ui, Arial" }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "16px 20px 0" }}>
-        <ContentBanner globalStatsUpdatedAt={globalStatsUpdatedAt} />
+        <ContentBanner globalDataUpdatedAt={globalDataUpdatedAt} />
       </div>
 
       <main style={{ padding: 20, maxWidth: 1100, margin: "0 auto" }}>
@@ -625,11 +625,11 @@ export default function HomeClient() {
               <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
                 <thead style={{ background: "#fafcff" }}>
                   <tr>
-                    <Th style={{ width: 210 }}>Resort</Th>
-                    <Th style={{ width: 95 }}>Status</Th>
+                    <Th style={{ width: 200 }}>Resort</Th>
+                    <Th style={{ width: 160 }}>Status</Th>
                     <Th style={{ width: 85 }}>Trasy</Th>
                     <Th style={{ width: 95 }}>Otwarte km</Th>
-                    <Th style={{ width: 140 }}>Skipass</Th>
+                    <Th style={{ width: 130 }}>Skipass</Th>
                     <Th style={{ width: 90 }}>Wyciągi</Th>
                     <Th style={{ width: 130 }}>Przepustowość</Th>
                     <Th style={{ width: 150 }}>Aktualizacja</Th>
@@ -1068,14 +1068,14 @@ export default function HomeClient() {
 
 /* ===================== BANNER ===================== */
 
-function ContentBanner({ globalStatsUpdatedAt }: { globalStatsUpdatedAt: string | null }) {
+function ContentBanner({ globalDataUpdatedAt }: { globalDataUpdatedAt: string | null }) {
   return (
     <div style={{ border: "1px solid #e2e8f0", borderRadius: 16, overflow: "hidden", background: "#fafcff" }}>
       <div style={{ width: "100%", aspectRatio: "1470 / 300", background: "#fafcff" }}>
         <img src="/baner.png" alt="otwartestoki banner" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "center", display: "block" }} />
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 12px", background: "#ffffff", borderTop: "1px solid #e2e8f0", color: "#64748b", fontSize: 12 }}>
-        Ostatnia aktualizacja: <b style={{ color: "#0f172a" }}>{fmtDate(globalStatsUpdatedAt)}</b>
+        Ostatnia aktualizacja: <b style={{ color: "#0f172a" }}>{fmtDate(globalDataUpdatedAt)}</b>
       </div>
     </div>
   );
