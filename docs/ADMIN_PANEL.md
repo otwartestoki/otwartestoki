@@ -50,3 +50,16 @@ Bez logowania `/api/admin/records?table=resorts` powinno zwrócić 401. Konto sp
 Status narciarski jest liczony z pełnej listy tras, niezależnie od filtrów wyszukiwania. Komplet zamkniętych tras daje „Zamknięte”, nawet jeżeli starszy wpis ośrodka ma „otwarty” lub działa kolej turystyczna. Otwarcie wymaga przynajmniej jednej otwartej trasy oraz jawnego potwierdzenia statusu ośrodka z ostatnich 72 godzin. Bez tego strona pokazuje „Do weryfikacji”, a nie starsze otwarte kilometry jako aktualnie dostępne.
 
 W panelu pod statusem ośrodka są przyciski potwierdzenia zamknięcia i narciarskiego otwarcia. Zapisują status oraz last_checked_at z historią i odczytem kontrolnym. Zmiana samej nazwy czy długości nie odnawia potwierdzenia otwarcia. Potwierdzenie ośrodka nie przepisuje automatycznie statusów wszystkich tras ani wyciągów. Odczyt źródeł nie jest potwierdzeniem otwarcia, a brak dopasowania wymaga odrębnej weryfikacji obiektu.
+
+
+## Pokrycie źródeł
+
+Panel aktualizacji zawiera tabelę pokrycia dla wszystkich ośrodków: liczbę jednoznacznych statusów względem pełnego inwentarza bazy, braki oraz błędy pobierania. Licznik nie obejmuje konfliktów, statusów nieznanych ani podobieństwa długości.
+
+Katalog ma osobne adaptery dla warunków Zieleńca, pełnych tabel pięciu obszarów SkiResort Černá hora–Pec, tabeli wyciągów Szczyrku i ikon Zwardonia. Źródło Szczyrku udostępnia obecnie tylko część wyciągów; nie jest to pełny raport tras zimowych. Stary endpoint wyciągów Svobody zwracający 404 został zastąpiony oficjalną tabelą SkiResort.
+
+Zieleniec: elementy Webflow `w-condition-invisible` nie są bieżącym statusem. Numery porządkowe tras w bazie nie są kodami tras źródłowych. SkiResort: słowniki ikon tras i wyciągów są różne. Zwardoń: etykieta „Czynny” przy godzinach nie zmienia zamkniętej ikony wyciągu. Odczyt z API nie potwierdza aktualności danych operatora; data źródłowa pozostaje widoczna, także gdy jej brakuje.
+
+Dla wpisu bez nazwy unikalna długość w obrębie ośrodka i rodzaju obiektu może pokazać potencjalny obiekt do porównania. Taki wpis ma status nieznany i nie kwalifikuje się do zbiorczego zapisu. Powtarzające się długości nie tworzą dopasowania. Ręczna akceptacja wybranego pola pozostaje dostępna po sprawdzeniu tożsamości.
+
+Kontrola 29.10.2026 na 725 wpisach: 495 jednoznacznych statusów (poprzednio 374), 9 potencjalnych dopasowań po długości, 216 bez dopasowania; pozostałe 5 wymaga wyjaśnienia niejednoznaczności. To wynik konkretnego odczytu, nie gwarantowana kompletność. Część stron nie publikuje osobnych bieżących statusów, zawiera stare komunikaty lub inne identyfikatory. Brak odczytu nigdy nie oznacza zamknięcia.

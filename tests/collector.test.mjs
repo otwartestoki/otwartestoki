@@ -28,3 +28,30 @@ test('Conflicting independent sources, ambiguous source items and shared mapping
 test('Only unambiguous known changed status is eligible; unknown/partial not writable',()=>{assert.equal(changed(buildReport(snapshot(),[result([observation()])]).objects[0]),true);for(const status of ['unknown','partial'])assert.equal(changed(buildReport(snapshot(),[result([observation({status})])]).objects[0]),false);});
 test('Unmatched source objects and timestamp uncertainty remain visible',()=>{const r=buildReport(snapshot(),[result([observation({number:'99',name:'Inna'})])]);assert.equal(r.unmatched_source_objects.length,1);assert.equal(freshness(null),'brak daty źródła');assert.equal(freshness('2020-01-01T10:00:00Z'),'starsze niż 72h');assert.equal(freshness('2026-10-29T10:00:00'),'nieznana strefa daty');});
 process.on('exit',()=>rmSync(dir,{recursive:true,force:true}));
+
+
+test('SkiResort full tables keep slope and lift status dictionaries separate',()=>{
+ const html='<table class="sitour-table"><thead><tr><th>Nartostrady</th></tr></thead><tbody><tr><td><span class="status-2"></span></td><td>1a1</td><td>Ford</td><td>red</td><td>1600m</td></tr></tbody></table><table class="sitour-table"><thead><tr><th>Kolejki liniowe i wyciągi</th></tr></thead><tbody><tr><td><span class="status-2"></span></td><td>A2 <span class="type-4"></span>Protěž</td><td>1300 m</td></tr><tr><td><span class="status-9"></span></td><td>A3 Other</td><td>300 m</td></tr></tbody></table>';
+ const rows=parseSource({...source,adapter:'skiresort'},html);assert.equal(rows.length,3);assert.equal(rows[0].status,'open');assert.equal(rows[1].status,'closed');assert.equal(rows[1].number,'A2');assert.equal(rows[1].length_m,1300);assert.equal(rows[2].status,'unknown');
+});
+test('Szczyrk reads status image in the status cell, not a timetable or biking content',()=>{
+ const html='<p>Bike trasa 1 czynna</p><table id="lanovky_table"><tbody><tr><td class="stav"><img alt="Nieczynne"></td><td class="cislo">A1</td><td class="name">Gondola</td><td class="number">1434</td></tr></tbody></table>';
+ const rows=parseSource({...source,adapter:'szczyrk-lifts'},html);assert.equal(rows.length,1);assert.equal(rows[0].kind,'lift');assert.equal(rows[0].status,'closed');assert.equal(rows[0].length_m,1434);
+});
+test('Zwardon closed icon overrides the static Czynny timetable label',()=>{
+ const rows=parseSource({...source,adapter:'zwardon'},'<div><h2>Baby<br>Lift</h2><div>Czynny: 9-16</div><img src="/images/site/icons/ski-lift-close.png"></div>');assert.equal(rows[0].name,'Baby Lift');assert.equal(rows[0].status,'closed');
+});
+test('Zieleniec ignores hidden opposite statuses and does not invent a slope ordinal',()=>{
+ const html='<div class="wyciagi-target"><h3>B1 Talerzyk</h3><div class="div-block-89"><div class="text-block">Test</div></div><div class="lift-status is-open w-condition-invisible">Otwarty</div><div class="lift-status is-closed">Zamknięty</div><div class="career7_title-wrapper is-wyciag"><div class="heading-style-h6">B1 Ośla łączka</div><div class="button-group-copy"><div class="tag w-condition-invisible">Czynna</div><div class="tag">Nieczynna</div></div></div></div>';
+ const rows=parseSource({...source,adapter:'zieleniec'},html);assert.equal(rows.length,2);assert.ok(rows.every(row=>row.status==='closed'));assert.equal(rows[1].number,'');
+});
+test('Letter piste names provide codes without turning Trasa Biegowa into route B',()=>{assert.equal(numberFromName('Trasa A'),'A');assert.equal(numberFromName('Trasa Biegowa'),'');});
+test('Length-only clues remain manual and duplicate lengths never become candidates',()=>{
+ const db={id:1,resort:'r',number:'A',name:null,length_m:640,status:'otwarty'};const o=observation({kind:'lift',number:'',name:'Kolej krzesełkowa',length_m:640});
+ const row=buildReport(snapshot([],[db]),[result([o])]).objects[0];assert.equal(row.candidates.length,1);assert.equal(row.observed_status,'unknown');assert.equal(changed(row),false);
+ const duplicates=buildReport(snapshot([],[db,{...db,id:2,number:'B'}]),[result([o])]);assert.ok(duplicates.objects.every(row=>!row.candidates.length));
+});
+test('Lift type and descriptive prefixes separate similarly named surface and conveyor lifts',()=>{
+ const db={name:'Zgorzelisko',type:'orczyk'};assert.ok(score(db,observation({kind:'lift',name:'Wyciąg orczykowy Zgorzelisko'}),'lift')>score(db,observation({kind:'lift',name:'Wyciąg taśmowy Zgorzelisko'}),'lift'));
+ assert.ok(score({name:'Czarodziejska'},observation({name:'Czarodziejska Polana'}),'slope')>0);
+});

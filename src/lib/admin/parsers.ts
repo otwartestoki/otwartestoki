@@ -5,7 +5,7 @@ import { normalizeStatus } from "./validation";
 
 const text = (value: unknown) => String(value ?? "").replace(/\s+/g, " ").trim();
 export function numberFromName(name: string) {
-  return name.match(/^trasa\s*(?:nr\.?\s*)?([A-Za-z]*\d+(?:\/\d+)?[A-Za-z]*)(?:\s|$)/i)?.[1] || name.match(/^(?:wyciąg\s+|kolej linowa\s+|orczyk\s+|przenośnik\s+taśmowy\(taśma\)\s*)([A-Z])$/i)?.[1] || "";
+  return name.match(/^trasa\s*(?:nr\.?\s*)?([A-Z])(?:\s|$)/i)?.[1] || name.match(/^trasa\s*(?:nr\.?\s*)?([A-Za-z]*\d+(?:\/\d+)?[A-Za-z]*)(?:\s|$)/i)?.[1] || name.match(/^(?:wyciąg\s+|kolej linowa\s+|orczyk\s+|przenośnik\s+taśmowy\(taśma\)\s*)([A-Z])$/i)?.[1] || "";
 }
 type Data = Record<string, unknown>;
 const obj = (v: unknown): Data => v && typeof v === "object" && !Array.isArray(v) ? v as Data : {};
@@ -43,7 +43,42 @@ export function parseSource(source: Source, content: string): Candidate[] {
   }
   const $ = load(content); $("script,style").remove();
   const txt = (el: Parameters<typeof $>[0]) => text($(el).text());
-  if (mode === "tables") {
+  if (mode === "skiresort") {
+    // The provider uses different status dictionaries for pistes and lifts.
+    $("table.sitour-table").each((_, table) => {
+      const header = norm($(table).find("thead").text());
+      const kind = header.includes("nartostrady") ? "slope" : header.includes("kolejkiliniowe") ? "lift" : null;
+      if (!kind) return;
+      $(table).find("tbody > tr").each((_, row) => {
+        const cells = $(row).children("td");
+        const raw = cells.eq(0).find("[class]").attr("class")?.match(/(?:^|\s)status-(\d+)(?:\s|$)/)?.[1];
+        if (!raw) return;
+        const identity = text(cells.eq(1).text());
+        const number = kind === "slope" ? identity : identity.match(/^([A-Z]+\d+)\s/)?.[1];
+        if (!number) return;
+        const name = kind === "slope" ? text(cells.eq(2).text()) : identity.replace(/^[A-Z]+\d+\s+/, "");
+        const maps: Record<string, Record<string, Status>> = { lift: { "1": "open", "2": "closed", "3": "partial" }, slope: { "2": "open", "3": "closed", "6": "partial" } };
+        const length = text(cells.eq(kind === "slope" ? 4 : 2).text()).match(/^(\d+)\s*m$/)?.[1];
+        add(kind, number, name, maps[kind][raw] || "unknown", `status-${raw}`, number, length ? Number(length) : null, null, cells.toArray().map(c => txt(c)));
+      });
+    });
+  } else if (mode === "szczyrk-lifts") {
+    $("#lanovky_table tbody tr").each((_, row) => {
+      const number = text($(row).find(".cislo").text());
+      if (!/^[A-Z]+\d+$/.test(number)) return;
+      const image = $(row).find("td.stav img");
+      const raw = image.attr("alt") || image.attr("title") || "";
+      const length = text($(row).find("td.number").first().text()).replace(/\s/g, "").match(/^(\d+)(?:m)?$/)?.[1];
+      add("lift", number, text($(row).find(".name").text()), normalizeStatus(raw), raw, number, length ? Number(length) : null, null, txt(row));
+    });
+  } else if (mode === "zwardon") {
+    $("img[src$='ski-lift-close.png'],img[src$='ski-lift-open.png']").each((_, image) => {
+      const card = $(image).parent(), heading = card.find("h2").first().clone();
+      heading.find("br").replaceWith(" ");
+      const name = text(heading.text()), raw = $(image).attr("src") || "";
+      if (name) add("lift", name, name, raw.endsWith("ski-lift-close.png") ? "closed" : "open", raw, "", null, null, txt(card[0]));
+    });
+  } else if (mode === "tables") {
     const records = new Map<string, Candidate>();
     $("table").each((_, table) => {
       const rows = $(table).find("tr").toArray(); let start = -1, nameCol = -1, category = "";
@@ -86,6 +121,22 @@ export function parseSource(source: Source, content: string): Candidate[] {
         if (normalizeStatus(raw) === "unknown") return;
         add(mode === "bsa-lifts" ? "lift" : "slope", cells[0], mode === "bsa-lifts" ? cells[1] : `Trasa ${cells[0]}`, normalizeStatus(raw), raw, mode === "bsa-lifts" ? "" : cells[0], mode === "bsa" ? cells[2] : mode === "bsa-lifts" ? cells[3] : null, null, cells);
       }
+    });
+  } else if (mode === "zieleniec") {
+    $(".wyciagi-target").each((_, block) => {
+      const title = text($(block).find("h3").first().text()), code = title.match(/^([A-Z]+\d*[A-Z]*)\s/)?.[1] || "";
+      if (!code) return;
+      const name = text($(block).find(".div-block-89 > .text-block").first().text());
+      const length = text($(block).find(".div-block-82").first().text()).match(/(\d+)\s*m/)?.[1];
+      const states = $(block).children(".lift-status:not(.w-condition-invisible)").toArray().map(el => $(el).hasClass("is-closed") ? "closed" : $(el).hasClass("is-open") ? "open" : "unknown");
+      add("lift", code, name || title, states.length === 1 ? states[0] as Status : "unknown", states.join(" / "), code, length, null, title);
+      $(block).find(".career7_title-wrapper.is-wyciag").each((_, route) => {
+        const name = text($(route).find(".heading-style-h6").first().text());
+        const fields: Record<string, string> = {};
+        $(route).find(".div-block-44").each((_, field) => { const parts = $(field).children(); fields[text(parts.first().text())] = text(parts.last().text()); });
+        const badges = $(route).find(".button-group-copy > .tag:not(.w-condition-invisible)").toArray().map(el => normalizeStatus(text($(el).text())));
+        if (name) add("slope", name, name, badges.length === 1 ? badges[0] : "unknown", badges.join(" / "), "", fields["Długość, m"], null, { lift_code: code, ...fields });
+      });
     });
   } else if (mode === "wierchomla") {
     $("table").each((_, table) => {

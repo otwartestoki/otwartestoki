@@ -174,6 +174,12 @@ function LiveStatuses() {
       {results.length > 0 && <p className="comparison-legend"><span className="same">✓ Zielone — zgodne dane</span><span className="different">≠ Czerwone — różnice</span><span className="missing">— Szare — brak danych do porównania</span></p>}
       {!results.length && phase !== "scan" && <p>Widzisz wartości zapisane w bazie. Kliknij „Sprawdź źródła”, aby pobrać propozycje z internetu. Samo sprawdzanie nie zmienia bazy.</p>}
       {results.length > 0 && <p className="source-warning">Bez dopasowania do źródeł: {report.objects.filter(row => !row.candidates.length).length} obiektów. Akceptacja propozycji nie aktualizuje tych wpisów.</p>}
+      {results.length > 0 && <details className="resort-status"><summary>Pokrycie odczytu — wszystkie ośrodki</summary><div className="status-table-wrap"><table className="status-table"><thead><tr><th>Ośrodek</th><th>Jednoznaczny status</th><th>Do sprawdzenia</th><th>Źródła</th></tr></thead><tbody>{snapshot.resorts.map(resort => {
+        const id = String(resort.id), all = report.objects.filter(row => row.resort_id === id);
+        const known = all.filter(row => row.match === "propozycja do zatwierdzenia" && ["open", "closed"].includes(row.observed_status)).length;
+        const sources = snapshot.sources.filter(source => source.resort_id === id), checks = results.filter(result => result.source.resort_id === id);
+        return <tr key={id}><td data-label="Ośrodek"><button onClick={() => { setResortId(id); setFilter("issues"); }}>{String(resort.name)}</button></td><td data-label="Jednoznaczny status">{known} / {all.length}</td><td data-label="Do sprawdzenia">{all.length - known}</td><td data-label="Źródła">{!sources.length ? "Brak adaptera" : `${checks.length} / ${sources.length} sprawdzonych · ${checks.filter(check => check.error).length} błędów`}</td></tr>;
+      })}</tbody></table></div><p>Licznik obejmuje osobne, jednoznacznie dopasowane statusy tras i wyciągów. Podobna długość, brak danych i konflikt źródeł wymagają sprawdzenia.</p></details>}
       {!groups.length && <p>Brak wpisów spełniających wybrane filtry.</p>}
       <div className="records">{groups.map(resort => {
         const id = String(resort.id), rows = visible.filter(r => r.resort_id === id), sources = snapshot.sources.filter(s => s.resort_id === id), checked = results.filter(r => r.source.resort_id === id), differences = rows.filter(changed), extras = report.unmatched_source_objects?.filter(o => o.resort_id === id) || [];

@@ -348,14 +348,6 @@
     "expected_station": "Grapa Ski"
   },
   {
-    "id": "holiday-40-0",
-    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=37",
-    "file": "holiday-40-0.json",
-    "adapter": "holiday",
-    "resort_id": "f574e527-ebea-4f7f-83ad-be9d7efd1d2e",
-    "kind": "lift"
-  },
-  {
     "id": "holiday-40-1",
     "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=37",
     "file": "holiday-40-1.json",
@@ -377,5 +369,53 @@
     "adapter": "szrenica",
     "resort_id": "fdc48fbd-c8da-42e6-8932-fca953012a79",
     "legacy": null
+  },
+  {
+    "id": "zieleniec-conditions",
+    "resort_id": "f90729f7-97f7-459d-b61f-10c91fa5ff1d",
+    "url": "https://zieleniec.pl/zima/aktualne-warunki",
+    "adapter": "zieleniec"
+  },
+  {
+    "id": "skiresort-cerna-hora",
+    "resort_id": "06def352-7892-4992-aa26-6000800b8a79",
+    "adapter": "skiresort",
+    "url": "https://www.skiresort.cz/pl/skiarealy/cerna-hora/ch-lanovky-a-vleky/"
+  },
+  {
+    "id": "skiresort-pec-pod-snezkou",
+    "resort_id": "bbb155f1-f88e-4712-854e-37a01650c217",
+    "adapter": "skiresort",
+    "url": "https://www.skiresort.cz/pl/skiarealy/pec-pod-snezkou/pec-lanovky-a-vleky/"
+  },
+  {
+    "id": "skiresort-cerny-dul",
+    "resort_id": "38b5adf9-56c8-4176-89dc-40779662d781",
+    "adapter": "skiresort",
+    "url": "https://www.skiresort.cz/pl/skiarealy/cerny-dul/dul-lanovky-a-vleky/"
+  },
+  {
+    "id": "skiresort-velka-upa",
+    "resort_id": "6ca050ca-d56b-4bc3-8a91-dc7af761921c",
+    "adapter": "skiresort",
+    "url": "https://www.skiresort.cz/pl/skiarealy/velka-upa/upa-lanovky-a-vleky/"
+  },
+  {
+    "id": "skiresort-svoboda-nad-upou",
+    "resort_id": "f574e527-ebea-4f7f-83ad-be9d7efd1d2e",
+    "adapter": "skiresort",
+    "url": "https://www.skiresort.cz/pl/skiarealy/svoboda-nad-upou/svoboda-lanovky-a-vleky/"
+  },
+  {
+    "id": "szczyrk-official-lifts",
+    "resort_id": "8b588d71-3f5e-4c4a-b345-9b51b1eb497d",
+    "adapter": "szczyrk-lifts",
+    "url": "https://laravel.szczyrkowski.pl/api/szczyrkowski/lanovky?lang=pl&"
+  },
+  {
+    "id": "zwardon-official",
+    "resort_id": "a5714cec-bead-4ade-904b-be13203b1fc0",
+    "adapter": "zwardon",
+    "url": "https://www.zwardonski.pl/stacja-narciarska/mapa-osrodka"
   }
 ]
