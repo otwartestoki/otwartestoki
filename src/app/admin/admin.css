@@ -122,3 +122,8 @@
   .admin .comparison-heading, .admin .comparison-row { grid-template-columns: 64px minmax(0, 1fr) minmax(0, 1fr); }
   .admin .comparison-heading > span, .admin .comparison-row > span { padding: 6px 4px; }
 }
+
+.admin .comparison-source { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.admin .copy-source-field { min-height: 32px; padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #0f172a; font-size: 11px; font-weight: 800; }
+.admin .copy-source-field:hover:not(:disabled) { background: #f8fafc; border-color: #94a3b8; }
+.admin .field-save-message[role=status] { margin: 0; padding: 6px; font-size: 11px; font-weight: 500; }
