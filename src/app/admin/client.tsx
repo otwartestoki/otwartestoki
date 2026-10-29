@@ -2,6 +2,7 @@
 /* Full-page links intentionally unload public analytics when entering the private panel. */
 /* eslint-disable @next/next/no-html-link-for-pages, @next/next/no-img-element */
 import {useEffect,useState} from "react";
+import {usePathname} from "next/navigation";
 import {TABLES} from "@/lib/admin/schema";
 import type {Row} from "@/lib/admin/types";
 type ApiData={rows:Row[];record:Row;revision:string;email:string};
@@ -12,9 +13,10 @@ export async function api<T=ApiData>(path:string,body?:unknown,retry=true):Promi
   const data=await response.json(); if(!response.ok) throw new Error(data.error||"Błąd połączenia."); return data;
 }
 export function Shell({children}:{children:React.ReactNode}) {
+  const path=usePathname();
   const [email,setEmail]=useState(""); const [error,setError]=useState("");
   useEffect(()=>{api("me").then(d=>setEmail(d.email)).catch(e=>setError(e.message));},[]);
-  return <><header><a href="/admin"><img src="/baner.png" alt="Otwarte Stoki" /></a><span>Panel administratora</span></header><nav><a href="/admin/baza">Baza danych</a><a href="/admin/aktualizacje">Aktualizacje statusów</a><a href="/admin/historia">Historia zapisów</a><a href="/">Strona publiczna</a><button onClick={async()=>{await api("logout",{});window.location.href="/admin/login";}}>Wyloguj</button></nav><small>{email}</small>{error?<p role="alert">{error}</p>:email?children:<p>Sprawdzam dostęp…</p>}</>;
+  return <><header className="admin-banner"><a href="/admin" aria-label="Panel Otwarte Stoki"><img src="/baner.png" alt="Otwarte Stoki" /></a><div className="admin-banner-caption"><span>Panel administratora</span><small>{email || "Otwarte Stoki"}</small></div></header><nav><a href="/admin/baza" aria-current={path === "/admin/baza" ? "page" : undefined}>Baza danych</a><a href="/admin/aktualizacje" aria-current={path === "/admin/aktualizacje" ? "page" : undefined}>Aktualizacje statusów</a><a href="/admin/historia" aria-current={path === "/admin/historia" ? "page" : undefined}>Historia zapisów</a><a href="/">Strona publiczna</a><button onClick={async()=>{await api("logout",{});window.location.href="/admin/login";}}>Wyloguj</button></nav>{error?<p role="alert">{error}</p>:email?children:<p>Sprawdzam dostęp…</p>}</>;
 }
 export function Editor(){
  const [table,setTable]=useState("resorts"),[rows,setRows]=useState<Row[]>([]),[query,setQuery]=useState(""),[record,setRecord]=useState<Row|null>(null),[draft,setDraft]=useState<Row>({}),[rev,setRev]=useState(""),[message,setMessage]=useState(""),[busy,setBusy]=useState(false);
