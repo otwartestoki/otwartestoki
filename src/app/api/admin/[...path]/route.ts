@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { adminClient, assertAllowed, authClient, dbFailure, logoutResponse, REFRESH_COOKIE, requireAdmin, sameOrigin, sessionResponse } from "@/lib/admin/server";
 import { listRecords, readRecord, revision, saveRecord } from "@/lib/admin/records";
 import { HttpError, normalizeStatus } from "@/lib/admin/validation";
+import { checkSource, databaseSnapshot } from "@/lib/admin/collector";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 export const maxDuration=30;
@@ -29,6 +30,8 @@ async function handle(request: NextRequest, context: {params:Promise<{path:strin
     }
     const user=await requireAdmin(); let result:unknown;
     if(path==="me" && request.method==="GET") result={email:user.email};
+    else if(path==="snapshot" && request.method==="GET") result=await databaseSnapshot();
+    else if(path==="check-source" && request.method==="POST") result=await checkSource(body.source_id);
     else if(path==="records" && request.method==="GET") result={rows:await listRecords(request.nextUrl.searchParams.get("table")||"")};
     else if(path==="record" && request.method==="POST") { const row=await readRecord(body.table,body.identity); result={record:row,revision:revision(body.table,row)}; }
     else if(path==="save" && request.method==="POST") result=await saveRecord(body.table,String(body.revision||""),body.changes,user.id);

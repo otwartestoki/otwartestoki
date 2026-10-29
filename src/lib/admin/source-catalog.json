@@ -1,0 +1,381 @@
+[
+  {
+    "id": "berg-05e5cbc7-c7b0-4890-9e3d-1dd07f3fc1dc",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd38141a539d93aea577064",
+    "file": "extra/berg-05e5cbc7-c7b0-4890-9e3d-1dd07f3fc1dc.json",
+    "adapter": "berg",
+    "resort_id": "05e5cbc7-c7b0-4890-9e3d-1dd07f3fc1dc",
+    "expected_station": "Czorsztyn Ski"
+  },
+  {
+    "id": "holiday-36-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=4",
+    "file": "holiday-36-0.json",
+    "adapter": "holiday",
+    "resort_id": "06def352-7892-4992-aa26-6000800b8a79",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-36-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=4",
+    "file": "holiday-36-1.json",
+    "adapter": "holiday",
+    "resort_id": "06def352-7892-4992-aa26-6000800b8a79",
+    "kind": "slope"
+  },
+  {
+    "id": "holiday-44-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=9",
+    "file": "holiday-44-0.json",
+    "adapter": "holiday",
+    "resort_id": "0eff1180-3f06-4a6b-868a-b37f0a3a1b87",
+    "kind": "slope"
+  },
+  {
+    "id": "holiday-44-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=3",
+    "file": "holiday-44-1.json",
+    "adapter": "holiday",
+    "resort_id": "0eff1180-3f06-4a6b-868a-b37f0a3a1b87",
+    "kind": "slope"
+  },
+  {
+    "id": "holiday-44-2",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=9",
+    "file": "holiday-44-2.json",
+    "adapter": "holiday",
+    "resort_id": "0eff1180-3f06-4a6b-868a-b37f0a3a1b87",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-44-3",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=3",
+    "file": "holiday-44-3.json",
+    "adapter": "holiday",
+    "resort_id": "0eff1180-3f06-4a6b-868a-b37f0a3a1b87",
+    "kind": "lift"
+  },
+  {
+    "id": "bookmark-28",
+    "url": "https://skidolina.pl/",
+    "file": "28.html",
+    "adapter": "skidolina",
+    "resort_id": "186be286-4ca2-4073-850c-f756d7364132",
+    "legacy": null
+  },
+  {
+    "id": "berg-2c1d30b5-5f30-431f-b824-25fadb711909",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd38154a539d93aea577282",
+    "file": "extra/berg-2c1d30b5-5f30-431f-b824-25fadb711909.json",
+    "adapter": "berg",
+    "resort_id": "2c1d30b5-5f30-431f-b824-25fadb711909",
+    "expected_station": "Ski Suche "
+  },
+  {
+    "id": "berg-2df065bf-0546-43b8-a5ec-584d7d50f986",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd382dafd450b284be0b99c",
+    "file": "extra/berg-2df065bf-0546-43b8-a5ec-584d7d50f986.json",
+    "adapter": "berg",
+    "resort_id": "2df065bf-0546-43b8-a5ec-584d7d50f986",
+    "expected_station": "Witów Ski"
+  },
+  {
+    "id": "holiday-41-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=2",
+    "file": "holiday-41-0.json",
+    "adapter": "holiday",
+    "resort_id": "2f5e250b-e1b6-46fd-a67c-cfa6f9b52cd2",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-41-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=2",
+    "file": "holiday-41-1.json",
+    "adapter": "holiday",
+    "resort_id": "2f5e250b-e1b6-46fd-a67c-cfa6f9b52cd2",
+    "kind": "slope"
+  },
+  {
+    "id": "bookmark-26",
+    "url": "https://beskidsportarena.pl/szczyrk-trasy-narciarskie",
+    "file": "26.html",
+    "adapter": "bsa",
+    "resort_id": "322384b1-2752-42ba-9907-76cab83370be",
+    "legacy": null
+  },
+  {
+    "id": "bsa-lifts-v2",
+    "url": "https://beskidsportarena.pl/szczyrk-wyciagi-narciarskie-i-kolej-linowa",
+    "file": "more/bsa-lifts-v2.html",
+    "adapter": "bsa-lifts",
+    "resort_id": "322384b1-2752-42ba-9907-76cab83370be"
+  },
+  {
+    "id": "berg-35a746d9-f119-4fb1-8c2d-c35c20b80f4b",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd382ddfd450b284be0b9f4",
+    "file": "extra/berg-35a746d9-f119-4fb1-8c2d-c35c20b80f4b.json",
+    "adapter": "berg",
+    "resort_id": "35a746d9-f119-4fb1-8c2d-c35c20b80f4b",
+    "expected_station": "PKL Kasprowy"
+  },
+  {
+    "id": "bookmark-07",
+    "url": "https://www.pkl.pl/kasprowy-wierch/koleje-i-trasy.html",
+    "file": "07.html",
+    "adapter": "tables",
+    "resort_id": "35a746d9-f119-4fb1-8c2d-c35c20b80f4b",
+    "legacy": "kasprowy"
+  },
+  {
+    "id": "holiday-38-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=8",
+    "file": "holiday-38-0.json",
+    "adapter": "holiday",
+    "resort_id": "38b5adf9-56c8-4176-89dc-40779662d781",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-38-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=8",
+    "file": "holiday-38-1.json",
+    "adapter": "holiday",
+    "resort_id": "38b5adf9-56c8-4176-89dc-40779662d781",
+    "kind": "slope"
+  },
+  {
+    "id": "holiday-43-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=1&loc=2",
+    "file": "holiday-43-0.json",
+    "adapter": "holiday",
+    "resort_id": "3ed9e151-d5fb-408d-9dc4-48c7d2ece03c",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-43-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=1&loc=2",
+    "file": "holiday-43-1.json",
+    "adapter": "holiday",
+    "resort_id": "3ed9e151-d5fb-408d-9dc4-48c7d2ece03c",
+    "kind": "slope"
+  },
+  {
+    "id": "berg-4c21715b-b1fd-4640-b424-2ccb0ad06d59",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd3814da539d93aea5771c4",
+    "file": "extra/berg-4c21715b-b1fd-4640-b424-2ccb0ad06d59.json",
+    "adapter": "berg",
+    "resort_id": "4c21715b-b1fd-4640-b424-2ccb0ad06d59",
+    "expected_station": "Koziniec Ski"
+  },
+  {
+    "id": "bookmark-32",
+    "url": "https://maleciche.com/stacja-narciarska/wyciagi",
+    "file": "32.html",
+    "adapter": "maleciche",
+    "resort_id": "504bf595-b3c8-497d-ac00-7cf4c288d88a",
+    "legacy": null
+  },
+  {
+    "id": "resort-54034b07-28f4-4ade-96d6-b0881457128d",
+    "url": "https://tylicz.ski/#dica_divi_carouselitem_3",
+    "file": "resort-54034b07-28f4-4ade-96d6-b0881457128d.html",
+    "adapter": "tylicz",
+    "resort_id": "54034b07-28f4-4ade-96d6-b0881457128d"
+  },
+  {
+    "id": "bookmark-18",
+    "url": "https://karpaczskiarena.pl/trasy-i-wyciagi-karpacz-ski-arena/",
+    "file": "18.html",
+    "adapter": "tables",
+    "resort_id": "5425159c-cb86-4458-a782-90c168966eff",
+    "legacy": "karpacz"
+  },
+  {
+    "id": "bookmark-08",
+    "url": "https://wislaskiarena.pl/trasy-i-wyciagi/",
+    "file": "08.html",
+    "adapter": "tables",
+    "resort_id": "5eee45b3-42ad-40e8-a8a6-915683543372",
+    "legacy": "wisla"
+  },
+  {
+    "id": "holiday-39-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=19",
+    "file": "holiday-39-0.json",
+    "adapter": "holiday",
+    "resort_id": "6ca050ca-d56b-4bc3-8a91-dc7af761921c",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-39-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=19",
+    "file": "holiday-39-1.json",
+    "adapter": "holiday",
+    "resort_id": "6ca050ca-d56b-4bc3-8a91-dc7af761921c",
+    "kind": "slope"
+  },
+  {
+    "id": "berg-6d4d7af8-abfe-4687-a401-b3b0f61425f6",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd382dbfd450b284be0b9ca",
+    "file": "extra/berg-6d4d7af8-abfe-4687-a401-b3b0f61425f6.json",
+    "adapter": "berg",
+    "resort_id": "6d4d7af8-abfe-4687-a401-b3b0f61425f6",
+    "expected_station": "Długa Polana"
+  },
+  {
+    "id": "bookmark-21",
+    "url": "https://czarnagora.pl/komunikat-narciarski/",
+    "file": "21.html",
+    "adapter": "czarnagora",
+    "resort_id": "91ad07a9-010a-430b-9c98-ff7c48f6f783",
+    "legacy": null
+  },
+  {
+    "id": "bookmark-12",
+    "url": "https://www.cienkownarty.pl/zima/",
+    "file": "12.html",
+    "adapter": "cienkow",
+    "resort_id": "9fc574d8-db4b-4b25-b976-0365db16cd19",
+    "legacy": null
+  },
+  {
+    "id": "bookmark-31",
+    "url": "https://www.wierchomla.com.pl/",
+    "file": "31.html",
+    "adapter": "wierchomla",
+    "resort_id": "ae63130c-80c2-4613-9ee1-515152de225c",
+    "legacy": null
+  },
+  {
+    "id": "holiday-37-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=5",
+    "file": "holiday-37-0.json",
+    "adapter": "holiday",
+    "resort_id": "bbb155f1-f88e-4712-854e-37a01650c217",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-37-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=5",
+    "file": "holiday-37-1.json",
+    "adapter": "holiday",
+    "resort_id": "bbb155f1-f88e-4712-854e-37a01650c217",
+    "kind": "slope"
+  },
+  {
+    "id": "berg-c74e2b6f-2d5f-4252-898e-37e4875643d4",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd38145a539d93aea5770ea",
+    "file": "extra/berg-c74e2b6f-2d5f-4252-898e-37e4875643d4.json",
+    "adapter": "berg",
+    "resort_id": "c74e2b6f-2d5f-4252-898e-37e4875643d4",
+    "expected_station": "Rusiń-Ski"
+  },
+  {
+    "id": "bookmark-22",
+    "url": "https://www.pkl.pl/mosorny-gron/koleje-i-trasy.html",
+    "file": "22.html",
+    "adapter": "tables",
+    "resort_id": "cc9db800-580f-4a93-a698-4b70aa6b94bf",
+    "legacy": "mosorny"
+  },
+  {
+    "id": "bialka-data",
+    "url": "https://bialkatatrzanska.pl/json/ski-conditions.json",
+    "file": "bialka-data.json",
+    "adapter": "bialka",
+    "resort_id": "cde97773-e5e7-4acc-b594-0f9c0fa3bf99"
+  },
+  {
+    "id": "berg-cef48ca7-83f2-49e7-8620-45183d19f7a4",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd38149a539d93aea57715e",
+    "file": "extra/berg-cef48ca7-83f2-49e7-8620-45183d19f7a4.json",
+    "adapter": "berg",
+    "resort_id": "cef48ca7-83f2-49e7-8620-45183d19f7a4",
+    "expected_station": "Harenda"
+  },
+  {
+    "id": "bookmark-23",
+    "url": "https://www.pkl.pl/jaworzyna-krynicka/trasy-narciarskie.html",
+    "file": "23.html",
+    "adapter": "tables",
+    "resort_id": "dc2503bf-796c-4418-98e6-68b80dee730d",
+    "legacy": "jaworzyna"
+  },
+  {
+    "id": "pkl-jaworzyna-lifts",
+    "url": "https://www.pkl.pl/jaworzyna-krynicka/koleje-i-wyciagi.html",
+    "file": "extra/pkl-jaworzyna-lifts.html",
+    "adapter": "pkl-lifts",
+    "resort_id": "dc2503bf-796c-4418-98e6-68b80dee730d"
+  },
+  {
+    "id": "berg-dc960f15-6304-41f1-b3fa-bb5b5f5536f0",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd38148a539d93aea57713c",
+    "file": "extra/berg-dc960f15-6304-41f1-b3fa-bb5b5f5536f0.json",
+    "adapter": "berg",
+    "resort_id": "dc960f15-6304-41f1-b3fa-bb5b5f5536f0",
+    "expected_station": "Polana Szymoszkowa"
+  },
+  {
+    "id": "berg-e7e2d67b-1428-4ec7-bbdd-d3ef359d3578",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd38157a539d93aea5772d0",
+    "file": "extra/berg-e7e2d67b-1428-4ec7-bbdd-d3ef359d3578.json",
+    "adapter": "berg",
+    "resort_id": "e7e2d67b-1428-4ec7-bbdd-d3ef359d3578",
+    "expected_station": "Jurgów Ski"
+  },
+  {
+    "id": "holiday-42-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=21",
+    "file": "holiday-42-0.json",
+    "adapter": "holiday",
+    "resort_id": "eb2782b4-2953-4fdd-b6e9-7d0d10a5d82b",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-42-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=21",
+    "file": "holiday-42-1.json",
+    "adapter": "holiday",
+    "resort_id": "eb2782b4-2953-4fdd-b6e9-7d0d10a5d82b",
+    "kind": "slope"
+  },
+  {
+    "id": "berg-f3b833e2-6c6d-4ca3-89b4-614ce11e349d",
+    "url": "https://api.skiportal.bergregions.pl/api/external/v1/widgets/60098ce5fcca6d1d17202925?skiStationId=5fd3813ea539d93aea577012",
+    "file": "extra/berg-f3b833e2-6c6d-4ca3-89b4-614ce11e349d.json",
+    "adapter": "berg",
+    "resort_id": "f3b833e2-6c6d-4ca3-89b4-614ce11e349d",
+    "expected_station": "Grapa Ski"
+  },
+  {
+    "id": "holiday-40-0",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=loclifts_data&cntry=1&reg=2&loc=37",
+    "file": "holiday-40-0.json",
+    "adapter": "holiday",
+    "resort_id": "f574e527-ebea-4f7f-83ad-be9d7efd1d2e",
+    "kind": "lift"
+  },
+  {
+    "id": "holiday-40-1",
+    "url": "https://www.holidayinfo.cz/hol3_data.php?type=locslopes_data&cntry=1&reg=2&loc=37",
+    "file": "holiday-40-1.json",
+    "adapter": "holiday",
+    "resort_id": "f574e527-ebea-4f7f-83ad-be9d7efd1d2e",
+    "kind": "slope"
+  },
+  {
+    "id": "czarnow-details",
+    "url": "https://czarnow-ski.pl/index.warunki.html",
+    "file": "extra/czarnow-details.html",
+    "adapter": "czarnow",
+    "resort_id": "fc30c27a-9314-41e1-a157-95d59692a0db"
+  },
+  {
+    "id": "bookmark-20",
+    "url": "https://szrenicaskiarena.pl/koleje-i-wyciagi/",
+    "file": "20.html",
+    "adapter": "szrenica",
+    "resort_id": "fdc48fbd-c8da-42e6-8932-fca953012a79",
+    "legacy": null
+  }
+]

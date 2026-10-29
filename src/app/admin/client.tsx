@@ -5,10 +5,10 @@ import {useEffect,useState} from "react";
 import {TABLES} from "@/lib/admin/schema";
 import type {Row} from "@/lib/admin/types";
 type ApiData={rows:Row[];record:Row;revision:string;email:string};
-export async function api(path:string,body?:unknown,retry=true):Promise<ApiData> {
+export async function api<T=ApiData>(path:string,body?:unknown,retry=true):Promise<T> {
   let response:Response;
   try {response=await fetch(`/api/admin/${path}`,{method:body===undefined?"GET":"POST",headers:body===undefined?{}:{"Content-Type":"application/json"},body:body===undefined?undefined:JSON.stringify(body),cache:"no-store",signal:AbortSignal.timeout(35000)});} catch {throw new Error("Przekroczono czas lub przerwano połączenie. Odczytaj wpis i historię przed ponowieniem zapisu.");}
-  if(response.status===401 && retry && !["login","refresh"].includes(path)) {try {await api("refresh",{},false); return api(path,body,false);} catch {window.location.href="/admin/login";}}
+  if(response.status===401 && retry && !["login","refresh"].includes(path)) {try {await api("refresh",{},false); return api<T>(path,body,false);} catch {window.location.href="/admin/login";}}
   const data=await response.json(); if(!response.ok) throw new Error(data.error||"Błąd połączenia."); return data;
 }
 export function Shell({children}:{children:React.ReactNode}) {
