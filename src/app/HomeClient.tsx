@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import { normalizeSkiStatus, publicSkiStatus, summarizeSlopes, type SlopeAvailability } from "@/lib/skiAvailability";
 import { useRouter, useSearchParams } from "next/navigation";
 
 /* ===================== TYPES ===================== */
@@ -60,15 +61,10 @@ const PAGE_SIZE = 15;
 
 /* ===================== HELPERS ===================== */
 
-function normalizeResortStatus(s?: string | null) {
-  const v = (s ?? "").toLowerCase().trim();
-  if (["open", "otwarty", "otwarta", "otwarte", "opened"].includes(v)) return "open";
-  if (["closed", "zamkniety", "zamknięty", "zamknieta", "zamknięta", "zamkniete", "zamknięte"].includes(v)) return "closed";
-  return "closed";
-}
+const normalizeResortStatus = normalizeSkiStatus;
 
 function statusLabel(s: string) {
-  return s === "open" ? "Otwarte" : "Zamknięte";
+  return s === "open" ? "Otwarte" : s === "closed" ? "Zamknięte" : "Do weryfikacji";
 }
 
 function statusPillStyle(s: string) {
@@ -83,12 +79,13 @@ function statusPillStyle(s: string) {
     whiteSpace: "nowrap" as const,
   };
   if (s === "open") return { ...base, background: "#f0fdf4", borderColor: "#bbf7d0", color: "#166534" };
+  if (s === "unknown") return { ...base, background: "#fffbeb", borderColor: "#fde68a", color: "#92400e" };
   return { ...base, background: "#f8fafc", borderColor: "#e2e8f0", color: "#334155" };
 }
 
 function dotStyle(s: string) {
   const base = { width: 8, height: 8, borderRadius: 999, display: "inline-block" as const };
-  return s === "open" ? { ...base, background: "#16a34a" } : { ...base, background: "#94a3b8" };
+  return { ...base, background: s === "open" ? "#16a34a" : s === "unknown" ? "#d97706" : "#94a3b8" };
 }
 
 function fmtDate(d?: string | null) {
@@ -231,7 +228,7 @@ export default function HomeClient() {
   const [error, setError] = useState<string | null>(null);
 
   const [globalStatsUpdatedAt, setGlobalStatsUpdatedAt] = useState<string | null>(null);
-  const [tiles, setTiles] = useState<{ open: number; closed: number }>({ open: 0, closed: 0 });
+  const [tiles, setTiles] = useState<{ open: number; closed: number; unknown: number }>({ open: 0, closed: 0, unknown: 0 });
 
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("open_km_desc");
@@ -426,6 +423,27 @@ export default function HomeClient() {
         baseRows = Array.from(merged.values());
       }
 
+      // Use the complete ski-run inventory, regardless of the active difficulty filter.
+      // The manual resort flag and tourist lifts do not prove that skiing is available.
+      const slopeInventory: SlopeAvailability[] = [];
+      for (let offset = 0; ; offset += 1000) {
+        const result = await supabase.from("slopes").select("id,resort,status").order("id").range(offset, offset + 999);
+        if (result.error) throw result.error;
+        slopeInventory.push(...result.data);
+        if (result.data.length < 1000) break;
+        if (offset >= 49000) throw new Error("Nie udało się potwierdzić kompletności danych tras.");
+      }
+      const skiing = summarizeSlopes(slopeInventory);
+      baseRows = baseRows.map(row => {
+        const status = publicSkiStatus(row.status_norm, row.last_checked_at, skiing.get(String(row.id)));
+        return {
+          ...row, status_norm: status,
+          // Do not advertise unverified legacy kilometres as currently open.
+          ...(status === "unknown" ? { open_km: null, slopes_open: null, lifts_open: null, lifts_capacity_open_pph: null } : {}),
+          ...(status === "closed" ? { open_km: 0, slopes_open: 0 } : {}),
+        };
+      });
+
       // 2) dedupe po id (na wypadek duplikatów z RPC)
       const byId = new Map<string, ResortRow>();
       for (const r of baseRows) {
@@ -476,8 +494,8 @@ export default function HomeClient() {
 
       // 5) tiles zgodne z filtrem
       const openCount = sorted.filter((r) => normalizeResortStatus(r.status_norm) === "open").length;
-      const closedCount = sorted.length - openCount;
-      setTiles({ open: openCount, closed: closedCount });
+      const closedCount = sorted.filter(r => normalizeResortStatus(r.status_norm) === "closed").length;
+      setTiles({ open: openCount, closed: closedCount, unknown: sorted.length - openCount - closedCount });
 
       // ✅ baza dla opcji filtrów (pełna lista po filtrach)
       setFilterBaseRows(sorted);
@@ -496,7 +514,7 @@ export default function HomeClient() {
       setRows([]);
       setFilterBaseRows([]);
       setTotalCount(0);
-      setTiles({ open: 0, closed: 0 });
+      setTiles({ open: 0, closed: 0, unknown: 0 });
       setFilterBaseRows([]);
       setLoading(false);
     }
@@ -539,7 +557,10 @@ export default function HomeClient() {
         <div className="tilesGrid">
           <Tile title="Otwarte" value={tiles.open} />
           <Tile title="Zamknięte" value={tiles.closed} />
+          <Tile title="Do weryfikacji" value={tiles.unknown} />
         </div>
+
+        <p style={{ color: "#64748b", fontSize: 12, marginBottom: 14 }}>Status dotyczy jazdy na nartach. „Do weryfikacji” oznacza brak potwierdzenia statusu ośrodka w ostatnich 72 godzinach. Otwarcie kolei turystycznej nie oznacza otwartych tras.</p>
 
         {/* ===================== TOP BAR ===================== */}
         <div className="topBar">
@@ -681,8 +702,8 @@ export default function HomeClient() {
                             </span>
                           </Td>
 
-                          <Td style={{ textAlign: "left" }}>{`${slopesOpen} / ${slopesTotal}`}</Td>
-                          <Td style={{ textAlign: "left" }}>{`${round1(openKm)} km`}</Td>
+                          <Td style={{ textAlign: "left" }}>{`${s === "unknown" ? "—" : slopesOpen} / ${slopesTotal}`}</Td>
+                          <Td style={{ textAlign: "left" }}>{s === "unknown" ? "—" : `${round1(openKm)} km`}</Td>
 
                           <Td style={{ textAlign: "left" }}>
                             {hasPrice ? (
@@ -710,7 +731,7 @@ export default function HomeClient() {
                             )}
                           </Td>
 
-                          <Td style={{ textAlign: "left" }}>{`${liftsOpen} / ${liftsTotal}`}</Td>
+                          <Td style={{ textAlign: "left" }}>{`${s === "unknown" ? "—" : liftsOpen} / ${liftsTotal}`}</Td>
 
                           <Td style={{ textAlign: "left" }}>{pphOpen > 0 ? fmtPPH(pphOpen) : <span style={{ color: "#94a3b8" }}>—</span>}</Td>
 
@@ -941,7 +962,7 @@ export default function HomeClient() {
         <style jsx>{`
           .tilesGrid {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 10px;
             margin-top: 14px;
             margin-bottom: 14px;
@@ -1221,9 +1242,9 @@ function ResortCards({
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
-              <MiniStat label="Otwarte km" value={`${round1(openKm)} km`} sub={totalKm > 0 ? `z ${round1(totalKm)} km` : undefined} />
-              <MiniStat label="Trasy" value={`${slopesOpen} / ${slopesTotal}`} />
-              <MiniStat label="Wyciągi" value={`${liftsOpen} / ${liftsTotal}`} />
+              <MiniStat label="Otwarte km" value={s === "unknown" ? "—" : `${round1(openKm)} km`} sub={totalKm > 0 ? `z ${round1(totalKm)} km` : undefined} />
+              <MiniStat label="Trasy" value={`${s === "unknown" ? "—" : slopesOpen} / ${slopesTotal}`} />
+              <MiniStat label="Wyciągi" value={`${s === "unknown" ? "—" : liftsOpen} / ${liftsTotal}`} />
               <MiniStat label="Przepustowość" value={pphOpen > 0 ? fmtPPH(pphOpen) : "—"} />
             </div>
 

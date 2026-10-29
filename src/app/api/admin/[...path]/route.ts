@@ -35,6 +35,7 @@ async function handle(request: NextRequest, context: {params:Promise<{path:strin
     else if(path==="records" && request.method==="GET") result={rows:await listRecords(request.nextUrl.searchParams.get("table")||"")};
     else if(path==="record" && request.method==="POST") { const row=await readRecord(body.table,body.identity); result={record:row,revision:revision(body.table,row)}; }
     else if(path==="save" && request.method==="POST") result=await saveRecord(body.table,String(body.revision||""),body.changes,user.id);
+    else if(path==="confirm-resort" && request.method==="POST") result=await saveRecord("resorts",String(body.revision||""),{status:body.status},user.id,true);
     else if(path==="proposal" && request.method==="POST") {
       if(!["slopes","lifts"].includes(body.table) || !["open","closed"].includes(body.target)) throw new HttpError(400,"Nieprawidłowa propozycja.");
       const row=await readRecord(body.table,{id:body.id});

@@ -44,3 +44,9 @@ Każdy odczyt i zapis API sprawdza użytkownika przez Supabase `getUser` i serwe
 ## Sprawdzenie wdrożenia
 
 Bez logowania `/api/admin/records?table=resorts` powinno zwrócić 401. Konto spoza listy powinno dostać 403. Po zalogowaniu sprawdź odczyt każdej tabeli, a następnie na bazie testowej zmianę jednego pola i wpis `verified` w historii. Sprawdź konflikt w dwóch kartach. Nie testuj zapisu zbiorczego na danych produkcyjnych bez wybrania rzeczywistych zmian.
+
+## Status na stronie głównej
+
+Status narciarski jest liczony z pełnej listy tras, niezależnie od filtrów wyszukiwania. Komplet zamkniętych tras daje „Zamknięte”, nawet jeżeli starszy wpis ośrodka ma „otwarty” lub działa kolej turystyczna. Otwarcie wymaga przynajmniej jednej otwartej trasy oraz jawnego potwierdzenia statusu ośrodka z ostatnich 72 godzin. Bez tego strona pokazuje „Do weryfikacji”, a nie starsze otwarte kilometry jako aktualnie dostępne.
+
+W panelu pod statusem ośrodka są przyciski potwierdzenia zamknięcia i narciarskiego otwarcia. Zapisują status oraz last_checked_at z historią i odczytem kontrolnym. Zmiana samej nazwy czy długości nie odnawia potwierdzenia otwarcia. Potwierdzenie ośrodka nie przepisuje automatycznie statusów wszystkich tras ani wyciągów. Odczyt źródeł nie jest potwierdzeniem otwarcia, a brak dopasowania wymaga odrębnej weryfikacji obiektu.

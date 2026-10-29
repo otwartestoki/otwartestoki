@@ -8,7 +8,7 @@ try {
  execFileSync(process.execPath,['node_modules/typescript/bin/tsc','src/lib/admin/collector.ts','--outDir',dir,'--module','commonjs','--target','es2020','--esModuleInterop','--resolveJsonModule','--skipLibCheck'],{stdio:'inherit'});
  test('collector rejects arbitrary destinations and reports HTTP, redirect, size and timeout failures without observations',()=>{
   const script=`
-   const assert=require('node:assert/strict');const {checkSource}=require(${JSON.stringify(dir+'\\collector.js')});const catalog=require('./src/lib/admin/source-catalog.json');const source=catalog.find(s=>s.adapter==='berg');
+   const assert=require('node:assert/strict');const {checkSource}=require(${JSON.stringify(resolve(dir,'admin/collector.js'))});const catalog=require('./src/lib/admin/source-catalog.json');const source=catalog.find(s=>s.adapter==='berg');
    (async()=>{
     let calls=0;global.fetch=async()=>{calls++;return new Response(null,{status:302,headers:{location:'http://127.0.0.1/private'}})};
     await assert.rejects(checkSource('https://127.0.0.1/private'),e=>e.status===400);assert.equal(calls,0);
