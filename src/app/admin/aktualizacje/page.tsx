@@ -15,7 +15,7 @@ export default function Page() { return <Shell><LiveStatuses /></Shell>; }
 function LiveStatuses() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [results, setResults] = useState<SourceResult[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [savingKey, setSavingKey] = useState<string | null>(null);
   const [receipts, setReceipts] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<"idle" | "read" | "scan" | "save">("read");
   const [message, setMessage] = useState("");
@@ -35,13 +35,13 @@ function LiveStatuses() {
 
   async function read() {
     setPhase("read"); setMessage("");
-    try { const data = await api<Snapshot>("snapshot"); setSnapshot(data); setResults([]); setSelected(new Set()); setReceipts({}); setProgress({ done: 0, total: 0 }); setMessage("Odczytano aktualny stan Supabase."); }
+    try { const data = await api<Snapshot>("snapshot"); setSnapshot(data); setResults([]); setReceipts({}); setProgress({ done: 0, total: 0 }); setMessage("Odczytano aktualny stan Supabase."); }
     catch (e) { setMessage((e as Error).message); }
     finally { setPhase("idle"); }
   }
 
   async function scan() {
-    setPhase("scan"); stop.current = false; setMessage("Odczytuję aktualny stan bazy przed sprawdzeniem stron…"); setSelected(new Set()); setReceipts({}); setResults([]);
+    setPhase("scan"); stop.current = false; setMessage("Odczytuję aktualny stan bazy przed sprawdzeniem stron…"); setReceipts({}); setResults([]);
     try {
       const data = await api<Snapshot>("snapshot"); setSnapshot(data);
       const sources = data.sources.filter(s => !resortId || s.resort_id === resortId);
@@ -60,19 +60,21 @@ function LiveStatuses() {
         done += checked.length; errors += checked.filter(r => r.error).length;
         setResults(old => [...old, ...checked]); setProgress({ done, total: sources.length });
       }
-      setMessage(`${stop.current ? "Zatrzymano" : "Zakończono sprawdzanie"}: ${done} z ${sources.length} źródeł. ${errors ? `${errors} źródeł wymaga sprawdzenia ręcznego.` : ""} Przejrzyj propozycje i wybierz zmiany do zapisu.`);
+      setMessage(`${stop.current ? "Zatrzymano" : "Zakończono sprawdzanie"}: ${done} z ${sources.length} źródeł. ${errors ? `${errors} źródeł wymaga sprawdzenia ręcznego.` : ""} Przejrzyj propozycje i zaakceptuj zmiany przyciskiem.`);
     } catch (e) { setMessage((e as Error).message); }
     finally { setPhase("idle"); }
   }
 
-  async function save() {
-    if (!report) return;
-    const rows = report.objects.filter(row => selected.has(keyOf(row)) && changed(row));
+  async function save(proposals: ReportObject[]) {
+    if (busy) return;
+    const rows = proposals.filter(changed);
+    if (!rows.length) return;
     setPhase("save"); stop.current = false; let done = 0;
     try {
       for (const row of rows) {
         if (stop.current) break;
         const key = keyOf(row);
+        setSavingKey(key);
         setMessage(`Zapis ${done + 1} z ${rows.length}: ${String(row.name || row.number)}. Nie zamykaj strony.`);
         try {
           const data = await api("proposal", { table: row.kind === "slope" ? "slopes" : "lifts", id: Number(row.db_id), resort: row.resort_id, before: row.db_status, updated_at: row.db_updated_at, target: row.observed_status });
@@ -82,14 +84,14 @@ function LiveStatuses() {
             return { ...old, [field]: old[field].map((r: Row) => String(r.id) === row.db_id ? data.record : r) };
           });
           setReceipts(old => ({ ...old, [key]: "Potwierdzono status w bazie." }));
-          setSelected(old => { const next = new Set(old); next.delete(key); return next; }); done++;
+          done++;
         } catch (e) {
           setReceipts(old => ({ ...old, [key]: (e as Error).message }));
           setMessage(`Potwierdzono ${done} zmian. Zatrzymano po błędzie. Sprawdź aktualny wpis i historię przed ponowieniem.`); return;
         }
       }
       setMessage(`Potwierdzono ${done} zmian.${stop.current ? " Zatrzymano kolejkę." : ""}`);
-    } finally { setPhase("idle"); }
+    } finally { setPhase("idle"); setSavingKey(null); }
   }
 
   const visible = report?.objects.filter(row => (!resortId || row.resort_id === resortId) && (!search || `${row.name || ""} ${row.number || ""} ${snapshot?.resorts.find(r => r.id === row.resort_id)?.name}`.toLocaleLowerCase("pl").includes(search.toLocaleLowerCase("pl"))) && (filter === "changes" ? changed(row) : filter === "issues" ? !row.candidates.length || row.observed_status === "unknown" || row.match !== "propozycja do zatwierdzenia" : true)) || [];
@@ -118,9 +120,8 @@ function LiveStatuses() {
         <label>Pokaż<select value={filter} onChange={e => setFilter(e.target.value)}><option value="all">Całą bazę</option><option value="changes">Propozycje zmian</option><option value="issues">Braki i niejednoznaczne wyniki</option></select></label>
       </div>
       <div className="toolbar">
-        <button disabled={busy || !eligible.length} onClick={() => setSelected(new Set(eligible.map(keyOf)))}>Wybierz widoczne propozycje ({eligible.length})</button>
-        <button disabled={busy || !selected.size} onClick={() => setSelected(new Set())}>Odznacz</button>
-        <button className="primary" disabled={busy || !selected.size} onClick={save}>Zapisz zaakceptowane ({selected.size})</button>
+        <button className="primary" disabled={busy || !eligible.length} onClick={() => save(eligible)}>Akceptuj i zapisz widoczne ({eligible.length})</button>
+        <small>Możesz też zaakceptować pojedynczą zmianę przy wybranej trasie lub wyciągu.</small>
       </div>
       {!results.length && phase !== "scan" && <p>Widzisz wartości zapisane w bazie. Kliknij „Sprawdź źródła”, aby pobrać propozycje z internetu. Samo sprawdzanie nie zmienia bazy.</p>}
       {!groups.length && <p>Brak wpisów spełniających wybrane filtry.</p>}
@@ -135,7 +136,7 @@ function LiveStatuses() {
             {checked.map(r => <div className={r.error ? "source-warning" : "source-result"} key={r.source.id}><a href={r.source.url} target="_blank" rel="noreferrer">{new URL(r.source.url).hostname} ↗</a> · {r.error || `${r.observations.length} odczytanych obiektów`}<small>Pobrano: {date(r.fetched_at)}</small>{r.station && <p>Deklaracja stacji w źródle: {r.station.raw ? "otwarta" : "zamknięta"}. {r.station.note}</p>}</div>)}
             <div className="status-table-wrap"><table className="status-table"><thead><tr><th>Obiekt</th><th>Aktualnie w bazie</th><th>Odczyt ze źródła</th><th>Akceptacja</th></tr></thead><tbody>{rows.map(row => {
               const key = keyOf(row);
-              return <tr key={key}><td><small>{row.kind === "slope" ? "Trasa" : "Wyciąg"}</small><strong>{String(row.number || "")} {String(row.name || "bez nazwy")}</strong>{row.sector && <small>Sektor: {String(row.sector)}</small>}</td><td><span className={`status-pill ${row.db_status_norm}`}>{String(row.db_status || "brak")}</span><small>{date(row.db_updated_at)}</small></td><td>{row.candidates.length ? <><span className={`status-pill ${row.observed_status}`}>{labels[row.observed_status]}</span>{row.match !== "propozycja do zatwierdzenia" && <small>{row.match}</small>}<details><summary>Źródło i data ({row.candidates.length})</summary>{row.candidates.map((c, i) => <div className="candidate" key={i}><a href={c.url} target="_blank" rel="noreferrer">{c.name || c.source} ↗</a><small>Odczyt: {String(c.raw_status ?? "brak")} · {c.reason}</small><small>Data źródła: {c.source_updated_at || "brak daty"} · {c.freshness}</small><small>Pobrano: {date(c.fetched_at)}</small>{c.warnings?.map(w => <p className="source-warning" key={w}>{w}</p>)}</div>)}</details></> : <small>{checked.length ? "Brak dopasowania — sprawdź ręcznie" : "Jeszcze nie sprawdzono"}</small>}</td><td>{changed(row) ? <label><input type="checkbox" disabled={busy} checked={selected.has(key)} onChange={e => setSelected(old => { const next = new Set(old); if (e.target.checked) next.add(key); else next.delete(key); return next; })} />Zatwierdź</label> : <small>{row.candidates.length && row.db_status_norm === row.observed_status ? "Zgodne z bazą" : "—"}</small>}{receipts[key] && <p role="status">{receipts[key]}</p>}</td></tr>;
+              return <tr key={key}><td data-label="Obiekt"><small>{row.kind === "slope" ? "Trasa" : "Wyciąg"}</small><strong>{String(row.number || "")} {String(row.name || "bez nazwy")}</strong>{row.sector && <small>Sektor: {String(row.sector)}</small>}</td><td data-label="Aktualnie w bazie"><span className={`status-pill ${row.db_status_norm}`}>{String(row.db_status || "brak")}</span><small>{date(row.db_updated_at)}</small></td><td data-label="Odczyt ze źródła">{row.candidates.length ? <><span className={`status-pill ${row.observed_status}`}>{labels[row.observed_status]}</span>{row.match !== "propozycja do zatwierdzenia" && <small>{row.match}</small>}<details><summary>Źródło i data ({row.candidates.length})</summary>{row.candidates.map((c, i) => <div className="candidate" key={i}><a href={c.url} target="_blank" rel="noreferrer">{c.name || c.source} ↗</a><small>Odczyt: {String(c.raw_status ?? "brak")} · {c.reason}</small><small>Data źródła: {c.source_updated_at || "brak daty"} · {c.freshness}</small><small>Pobrano: {date(c.fetched_at)}</small>{c.warnings?.map(w => <p className="source-warning" key={w}>{w}</p>)}</div>)}</details></> : <small>{checked.length ? "Brak dopasowania — sprawdź ręcznie" : "Jeszcze nie sprawdzono"}</small>}</td><td data-label="Akceptacja">{changed(row) ? <button className="accept-change" disabled={busy} onClick={() => save([row])} aria-label={`Akceptuj i zapisz: ${String(row.name || row.number)}`}>{savingKey === key ? "Zapisuję…" : "Akceptuj i zapisz"}</button> : <small>{row.candidates.length && row.db_status_norm === row.observed_status ? "Zgodne z bazą" : "—"}</small>}{receipts[key] && <p role="status">{receipts[key]}</p>}</td></tr>;
             })}</tbody></table></div>
             {extras.length > 0 && <details><summary>Obiekty źródłowe bez dopasowania w bazie ({extras.length})</summary>{extras.map((o, i) => <p key={i}>{o.kind === "slope" ? "Trasa" : "Wyciąg"} {o.number} {o.name} · {labels[o.status]} · <a href={o.url} target="_blank" rel="noreferrer">źródło ↗</a></p>)}</details>}
           </div>
