@@ -5,6 +5,7 @@ import { tableSchema } from "./schema";
 import { HttpError, normalizeStatus, recordIdentity, validateChanges } from "./validation";
 import type { Row } from "./types";
 import { utcTimestamp } from "../skiAvailability";
+import { digitalOceanWriter } from "./digitalocean";
 
 function secret() { const s = process.env.ADMIN_REVISION_SECRET || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY; if (!s) throw new HttpError(503,"Brak konfiguracji serwera."); return s; }
 function signature(s: string) { return createHmac("sha256",secret()).update(s).digest("base64url"); }
@@ -31,18 +32,36 @@ export async function saveRecord(table: string, token: string, input: unknown, u
     changes.last_checked_at = new Date().toISOString();
   } else if (table === "resorts" && "status" in changes) changes.last_checked_at = new Date().toISOString();
   if(!Object.keys(changes).length) return {record:before,revision:revision(table,before)};
-  const db=adminClient(); const {data:audit,error:auditError}=await db.from("admin_audit").insert({actor:userId,table_name:table,identity:Object.fromEntries(spec.keys.map(k=>[k,before[k]])),before,changes,state:"prepared"}).select("id").single(); if(auditError) dbFailure(auditError);
+  const mirror = digitalOceanWriter();
+  const identity = Object.fromEntries(spec.keys.map(key => [key, before[key]]));
+  const db=adminClient(); const {data:audit,error:auditError}=await db.from("admin_audit").insert({actor:userId,table_name:table,identity,before,changes,state:"prepared"}).select("id").single(); if(auditError) dbFailure(auditError);
   const patch={...changes}; if("updated_at" in before) patch.updated_at=new Date().toISOString();
   let q=db.from(table).update(patch);
   for(const [k,v] of Object.entries(before)) { if(v===null) q=q.is(k,null); else if(typeof v!=="object") q=q.eq(k,v); }
-  const {data,error}=await q.select();
-  if(error) { await db.from("admin_audit").update({state:"unverified"}).eq("id",audit.id); dbFailure(error); }
-  if(data.length!==1) { await db.from("admin_audit").update({state:"conflict"}).eq("id",audit.id); throw new HttpError(409,"Wpis zmienił się w bazie. Odczytaj go ponownie."); }
-  const current=await readRecord(table,Object.fromEntries(spec.keys.map(k=>[k,before[k]])));
-  const verified=Object.entries(patch).every(([k,v])=>k==="updated_at" || (k==="last_checked_at" ? Number.isFinite(utcTimestamp(v)) && utcTimestamp(current[k])===utcTimestamp(v) : JSON.stringify(current[k])===JSON.stringify(v)));
-  const {error:logError}=await db.from("admin_audit").update({state:verified?"verified":"unverified",after:current}).eq("id",audit.id);
-  if(logError || !verified) throw new HttpError(502,"Zapis wysłany, ale potwierdzenie jest niepełne. Odczytaj wpis i sprawdź historię.");
-  return {record:current,revision:revision(table,current)};
+  const writeLocal = async () => {
+    const {data,error}=await q.select();
+    if(error) { await db.from("admin_audit").update({state:"unverified"}).eq("id",audit.id); dbFailure(error); }
+    if(data.length!==1) { await db.from("admin_audit").update({state:"conflict"}).eq("id",audit.id); throw new HttpError(409,"Wpis zmienił się w bazie. Odczytaj go ponownie."); }
+    const current=await readRecord(table,identity);
+    const verified=Object.entries(patch).every(([k,v])=>k==="updated_at" || (k==="last_checked_at" ? Number.isFinite(utcTimestamp(v)) && utcTimestamp(current[k])===utcTimestamp(v) : JSON.stringify(current[k])===JSON.stringify(v)));
+    const {error:logError}=await db.from("admin_audit").update({state:verified?"verified":"unverified",after:current}).eq("id",audit.id);
+    if(logError || !verified) throw new HttpError(502,"Zapis wysłany, ale potwierdzenie jest niepełne. Odczytaj wpis i sprawdź historię.");
+    return {record:current,revision:revision(table,current)};
+  };
+  if (!mirror) return writeLocal();
+
+  const [supabase, digitalOcean] = await Promise.allSettled([
+    writeLocal(),
+    mirror(table, identity, before, patch),
+  ]);
+  if (supabase.status === "fulfilled" && digitalOcean.status === "fulfilled") return supabase.value;
+  if (supabase.status === "fulfilled") {
+    throw new HttpError(502, "Supabase zapisał zmianę. DigitalOcean nie potwierdził zapisu.", "DIGITALOCEAN_UNCONFIRMED");
+  }
+  if (digitalOcean.status === "fulfilled") {
+    throw new HttpError(502, "DigitalOcean zapisał zmianę. Supabase nie potwierdził zapisu.", "SUPABASE_UNCONFIRMED");
+  }
+  throw new HttpError(502, "Obie bazy nie potwierdziły zapisu. Sprawdź aktualny stan.", "WRITE_UNCONFIRMED");
 }
 
 
