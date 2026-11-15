@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       }
       if (action === "resort-detail") {
         const id = String(payload.id ?? "");
-        if (!/^\d{1,12}$/.test(id)) return new Response(null, { status: 400 });
+        if (!/^(?:\d{1,12}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(id)) return new Response(null, { status: 400 });
         const [pub, base, slopes, lifts, coverage] = await Promise.all([
           db.from("resorts_public_list").select("id,name,region,city,country,resort_updated_at,resort_stats(slopes_open,slopes_total,open_km,total_km,lifts_open,lifts_total,skipass_price,skipass_currency,skipass_url,skipass_label,stats_updated_at)").eq("id", id).maybeSingle(),
           db.from("resorts").select("id,url,trail_map_url,webcam_url").eq("id", id).maybeSingle(),

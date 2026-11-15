@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       }
     } else if (body?.action === "resort-detail") {
       if (typeof body.id !== "string" && typeof body.id !== "number") return new Response(null, { status: 400 });
-      if (!/^\d{1,12}$/.test(String(body.id))) return new Response(null, { status: 400 });
+      if (!/^(?:\d{1,12}|[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.test(String(body.id))) return new Response(null, { status: 400 });
     } else if (!["updated-at", "slopes-inventory"].includes(body?.action)) {
       return new Response(null, { status: 400 });
     }
