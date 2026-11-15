@@ -32,7 +32,9 @@ export async function saveRecord(table: string, token: string, input: unknown, u
     changes.last_checked_at = new Date().toISOString();
   } else if (table === "resorts" && "status" in changes) changes.last_checked_at = new Date().toISOString();
     if(!Object.keys(changes).length) return {record:before,revision:revision(table,before),writes:[]};
-  const mirror = digitalOceanWriter();
+  let mirror: ReturnType<typeof digitalOceanWriter> = null;
+  let mirrorError: unknown;
+  try { mirror = digitalOceanWriter(); } catch (error) { mirrorError = error; }
   const identity = Object.fromEntries(spec.keys.map(key => [key, before[key]]));
   const db=adminClient(); const {data:audit,error:auditError}=await db.from("admin_audit").insert({actor:userId,table_name:table,identity,before,changes,state:"prepared"}).select("id").single(); if(auditError) dbFailure(auditError);
   const patch={...changes}; if("updated_at" in before) patch.updated_at=new Date().toISOString();
@@ -50,7 +52,7 @@ export async function saveRecord(table: string, token: string, input: unknown, u
   };
     const [supabase, digitalOcean] = await Promise.allSettled([
       writeLocal(),
-      mirror ? mirror(table, identity, before, patch) : Promise.reject(new Error("Brak konfiguracji zapisu na DigitalOcean.")),
+      mirror ? mirror(table, identity, before, patch) : Promise.reject(mirrorError instanceof Error ? mirrorError : new Error("Brak konfiguracji zapisu na DigitalOcean.")),
     ]);
     const writes = [
       {database:"supabase" as const,ok:supabase.status==="fulfilled",message:supabase.status==="fulfilled"?"Zapis potwierdzony odczytem.":"Supabase nie potwierdził zapisu."},
