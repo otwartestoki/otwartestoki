@@ -1,15 +1,10 @@
 export const runtime = "nodejs";
 
 export async function GET() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-
   return Response.json({
     where: "server",
-    url_present: !!url,
-    anon_present: !!anon,
-    url_sample: url ? url.slice(0, 30) + "..." : null,
-    anon_sample: anon ? anon.slice(0, 6) + "..." + anon.slice(-6) : null,
+    digitalocean_configured: Boolean(process.env.ADMIN_DIGITALOCEAN_WRITE_URL && process.env.ADMIN_DIGITALOCEAN_WRITE_TOKEN),
+    admin_database: process.env.ADMIN_DATABASE_MODE || "dual",
     node_env: process.env.NODE_ENV ?? null,
     vercel_env: process.env.VERCEL_ENV ?? null,
     git_commit: process.env.VERCEL_GIT_COMMIT_SHA ?? null,

@@ -1,5 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
-import { adminClient } from "@/lib/admin/server";
+import { adminClient, assertAllowed, authClient } from "@/lib/admin/server";
 import { tableSchema } from "@/lib/admin/schema";
 import { recordIdentity } from "@/lib/admin/validation";
 import { utcTimestamp } from "@/lib/skiAvailability";
@@ -26,6 +26,35 @@ export async function POST(request: Request) {
     if (raw.length > 100000) return new Response(null, { status: 413 });
     const payload = JSON.parse(raw);
     const db = adminClient();
+    if (payload.operation === "auth") {
+      if (payload.action === "login") {
+        if (typeof payload.email !== "string" || typeof payload.password !== "string" || payload.password.length > 1000) return new Response(null, { status: 400 });
+        const { data, error } = await authClient().auth.signInWithPassword({ email: payload.email, password: payload.password });
+        if (error || !data.user || !data.session) return new Response(null, { status: 401 });
+        assertAllowed(data.user);
+        return Response.json({ user: data.user, session: data.session }, { headers: { "Cache-Control": "no-store" } });
+      }
+      if (payload.action === "refresh") {
+        if (typeof payload.refresh_token !== "string" || payload.refresh_token.length > 10000) return new Response(null, { status: 400 });
+        const { data, error } = await authClient().auth.refreshSession({ refresh_token: payload.refresh_token });
+        if (error || !data.user || !data.session) return new Response(null, { status: 401 });
+        assertAllowed(data.user);
+        return Response.json({ user: data.user, session: data.session }, { headers: { "Cache-Control": "no-store" } });
+      }
+      if (payload.action === "get-user") {
+        if (typeof payload.access_token !== "string" || payload.access_token.length > 10000) return new Response(null, { status: 400 });
+        const { data, error } = await authClient().auth.getUser(payload.access_token);
+        if (error || !data.user) return new Response(null, { status: 401 });
+        assertAllowed(data.user);
+        return Response.json({ user: data.user }, { headers: { "Cache-Control": "no-store" } });
+      }
+      return new Response(null, { status: 400 });
+    }
+    if (payload.operation === "read" && payload.action === "history") {
+      const { data, error } = await db.from("admin_audit").select("*").order("created_at", { ascending: false }).limit(200);
+      if (error) return new Response(null, { status: 502 });
+      return Response.json({ rows: data ?? [] }, { headers: { "Cache-Control": "no-store" } });
+    }
     if (payload.operation === "public") {
       const action = payload.action;
       if (action === "updated-at") {
@@ -120,12 +149,24 @@ export async function POST(request: Request) {
       return new Response(null, { status: 409 });
     }
 
+    const actor = typeof payload.actor === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.actor) ? payload.actor : null;
+    let auditId: string | null = null;
+    if (actor) {
+      const { data: audit, error: auditError } = await db.from("admin_audit").insert({ actor, table_name: table, identity: keys, before: current, changes: patch, state: "prepared" }).select("id").single();
+      if (auditError || !audit) return new Response(null, { status: 502 });
+      auditId = audit.id;
+    }
+
     let update = db.from(table).update(patch);
     for (const key of new Set([...Object.keys(keys), ...fields])) {
       update = current[key] === null ? update.is(key, null) : update.eq(key, current[key]);
     }
     const result = await update.select().single();
     const confirmed = !result.error && changed.every(key => equal(key, result.data[key], patch[key]));
+    if (auditId) {
+      const { error: auditError } = await db.from("admin_audit").update({ state: confirmed ? "verified" : result.error ? "unverified" : "conflict", after: result.data ?? null }).eq("id", auditId);
+      if (auditError && confirmed) await db.from("admin_audit").update({ state: "unverified", after: result.data }).eq("id", auditId);
+    }
     return confirmed
       ? Response.json({ record: result.data }, { headers: { "Cache-Control": "no-store" } })
       : new Response(null, { status: 409 });

@@ -7,7 +7,8 @@ import type { DatabaseSource, Row } from "./types";
 import { utcTimestamp } from "../skiAvailability";
 import { digitalOceanRead, digitalOceanWriter } from "./digitalocean";
 
-function secret() { const s = process.env.ADMIN_REVISION_SECRET || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY; if (!s) throw new HttpError(503,"Brak konfiguracji serwera."); return s; }
+function secret() { const s = process.env.ADMIN_REVISION_SECRET || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.ADMIN_DIGITALOCEAN_WRITE_TOKEN; if (!s) throw new HttpError(503,"Brak konfiguracji serwera."); return s; }
+const dropletOnly = () => process.env.ADMIN_DATABASE_MODE === "droplet";
 function signature(s: string) { return createHmac("sha256",secret()).update(s).digest("base64url"); }
 type RevisionState = { table: string; source: DatabaseSource; records: Record<DatabaseSource, Row | null>; expires: number };
 export function revisionFor(table: string, records: Record<DatabaseSource, Row | null>, source: DatabaseSource) {
@@ -34,10 +35,17 @@ export async function listRecords(table: string) {
   throw new HttpError(413,"Zbyt wiele wpisów do jednorazowego odczytu.");
 }
 export async function listRecordsFrom(table: string, source: DatabaseSource) {
-  if(source==="supabase") return listRecords(table);
+  if(source==="supabase") {
+    if (dropletOnly()) throw new HttpError(503,"Panel został przełączony na DigitalOcean.");
+    return listRecords(table);
+  }
   return (await digitalOceanRead<{ rows: Row[] }>({ table, action: "list" })).rows;
 }
 export async function listRecordsBoth(table: string) {
+  if (dropletOnly()) {
+    const result = await digitalOceanRead<{ rows: Row[] }>({ table, action: "list" });
+    return { supabase: { ok: false as const, error: "Wyłączone — panel korzysta z DigitalOcean." }, droplet: { ok: true as const, rows: result.rows } };
+  }
   const [supabase, droplet] = await Promise.allSettled([
     listRecords(table),
     digitalOceanRead<{ rows: Row[] }>({ table, action: "list" }),
@@ -49,6 +57,10 @@ export async function listRecordsBoth(table: string) {
 }
 export async function readRecordBoth(table: string, identity: unknown) {
   const spec = tableSchema(table), keys = recordIdentity(spec, identity);
+  if (dropletOnly()) {
+    const { record } = await digitalOceanRead<{ record: Row | null }>({ table, action: "record", identity: keys });
+    return { supabase: { ok: false as const, error: "Wyłączone — panel korzysta z DigitalOcean." }, droplet: { ok: true as const, record } };
+  }
   const supabaseRead = async () => {
     let q = adminClient().from(table).select("*");
     for (const [key, value] of Object.entries(keys)) q = q.eq(key, value);
@@ -66,13 +78,17 @@ export async function readRecordBoth(table: string, identity: unknown) {
   };
 }
 export async function readRecordFrom(table: string, identity: unknown, source: DatabaseSource) {
-  if(source==="supabase") return readRecord(table,identity);
+  if(source==="supabase") {
+    if (dropletOnly()) throw new HttpError(503,"Panel został przełączony na DigitalOcean.");
+    return readRecord(table,identity);
+  }
   const spec=tableSchema(table), keys=recordIdentity(spec,identity);
   const result=await digitalOceanRead<{record:Row|null}>({table,action:"record",identity:keys});
   if(!result.record) throw new HttpError(404,"Nie znaleziono wpisu w wybranej bazie.");
   return result.record;
 }
-export async function saveRecord(table: string, token: string, input: unknown, userId: string, confirmResortStatus = false, target: DatabaseSource | "both" = "both") {
+export async function saveRecord(table: string, token: string, input: unknown, userId: string, confirmResortStatus = false, target: DatabaseSource | "both" = dropletOnly() ? "droplet" : "both") {
+  if (dropletOnly() && target !== "droplet") throw new HttpError(400,"Panel został przełączony na zapis w DigitalOcean.");
   const spec=tableSchema(table), state=decode(token,table), before=state.records[state.source];
   if(!before) throw new HttpError(409,"Wpis nie istnieje w wybranej bazie. Odczytaj go ponownie.");
   const changes=validateChanges(spec,input,before);
@@ -105,7 +121,7 @@ export async function saveRecord(table: string, token: string, input: unknown, u
   };
     const [supabase, digitalOcean] = await Promise.allSettled([
       target === "droplet" ? Promise.reject(new Error("Pominięto zgodnie z wyborem.")) : writeLocal(),
-      target === "supabase" ? Promise.reject(new Error("Pominięto zgodnie z wyborem.")) : mirror ? mirror(table, identity, dropletBefore, patch) : Promise.reject(mirrorError instanceof Error ? mirrorError : new Error("Brak konfiguracji zapisu na DigitalOcean.")),
+      target === "supabase" ? Promise.reject(new Error("Pominięto zgodnie z wyborem.")) : mirror ? mirror(table, identity, dropletBefore, patch, userId) : Promise.reject(mirrorError instanceof Error ? mirrorError : new Error("Brak konfiguracji zapisu na DigitalOcean.")),
     ]);
     const writes: {database:DatabaseSource;ok:boolean;message:string}[] = [];
     if (target !== "droplet") writes.push({database:"supabase",ok:supabase.status==="fulfilled",message:supabase.status==="fulfilled"?"Zapis potwierdzony odczytem.":"Supabase nie potwierdził zapisu."});
@@ -149,14 +165,14 @@ export async function closeResortStep(token: string, userId: string) {
     const selected=records[state.source];
     if(!selected||Object.entries(row).some(([key,value])=>JSON.stringify(selected[key])!==JSON.stringify(value))) throw new HttpError(409,"Trasa lub wyciąg zmieniły się podczas zamykania. Odśwież dane i ponów operację.");
     const rowRevision=revisionFor(table,records,state.source);
-    const saved=await saveRecord(table,rowRevision,{status:"zamknięta"},userId);
+    const saved=await saveRecord(table,rowRevision,{status:"zamknięta"},userId,false,dropletOnly()?"droplet":"both");
     collect(saved.writes);
   }
   const after = await resortInventory(before.id,state.source);
   const remaining = [...after.slopes, ...after.lifts].filter(row => normalizeStatus(row.status) !== "closed").length;
   if (remaining) return { complete: false as const, remaining, inventory: after, writes:[...writes.values()] };
   // Confirm the resort only after every slope and lift has been read back as closed.
-  const saved = await saveRecord("resorts", token, { status: "zamknięty" }, userId, true);
+  const saved = await saveRecord("resorts", token, { status: "zamknięty" }, userId, true, dropletOnly()?"droplet":"both");
   collect(saved.writes);
   const verified = await resortInventory(before.id,state.source);
   if ([...verified.slopes, ...verified.lifts].some(row => normalizeStatus(row.status) !== "closed")) throw new HttpError(409, "Status obiektu zmienił się podczas zamykania. Odśwież bazę i ponów zamknięcie ośrodka.");

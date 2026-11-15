@@ -10,11 +10,11 @@ export function digitalOceanWriter() {
     throw new HttpError(503, "Brak pełnej konfiguracji zapisu na DigitalOcean.");
   }
 
-  return async (table: string, identity: Row, before: Row | null, patch: Row): Promise<Row> => {
+  return async (table: string, identity: Row, before: Row | null, patch: Row, actor?: string): Promise<Row> => {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ table, identity, before, patch }),
+      body: JSON.stringify({ table, identity, before, patch, actor }),
       cache: "no-store",
       redirect: "error",
       signal: AbortSignal.timeout(6000),
@@ -35,11 +35,30 @@ export async function digitalOceanRead<T>(request: Record<string, unknown>): Pro
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ ...request, operation: request.operation === "public" ? "public" : "read" }),
+    body: JSON.stringify({ ...request, operation: request.operation === "public" || request.operation === "auth" ? request.operation : "read" }),
     cache: "no-store",
     redirect: "error",
     signal: AbortSignal.timeout(12000),
   });
   if (!response.ok) throw new Error(`DigitalOcean nie potwierdził odczytu (HTTP ${response.status}).`);
+  return response.json() as Promise<T>;
+}
+
+export async function digitalOceanAuth<T>(action: string, payload: Record<string, unknown>): Promise<T> {
+  const endpoint = process.env.ADMIN_DIGITALOCEAN_WRITE_URL;
+  const token = process.env.ADMIN_DIGITALOCEAN_WRITE_TOKEN;
+  if (!endpoint || !token || !URL.canParse(endpoint) || new URL(endpoint).protocol !== "https:") {
+    throw new HttpError(503, "Brak konfiguracji logowania DigitalOcean.", "CONFIG_REQUIRED");
+  }
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "auth", action, ...payload }),
+    cache: "no-store",
+    redirect: "error",
+    signal: AbortSignal.timeout(10000),
+  });
+  if (response.status === 401) throw new HttpError(401, "Nieprawidłowy e-mail lub hasło.", "UNAUTHORIZED");
+  if (!response.ok) throw new HttpError(503, "Droplet nie potwierdził operacji logowania.", "AUTH_UNAVAILABLE");
   return response.json() as Promise<T>;
 }

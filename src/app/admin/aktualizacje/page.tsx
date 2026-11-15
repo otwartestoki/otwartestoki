@@ -20,14 +20,14 @@ export default function Page() { return <Shell><LiveStatuses /></Shell>; }
 
 function LiveStatuses() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [sourceDatabase, setSourceDatabase] = useState<DatabaseSource | null>(null);
+  const [sourceDatabase, setSourceDatabase] = useState<DatabaseSource | null>("droplet");
   const [results, setResults] = useState<SourceResult[]>([]);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [activeField, setActiveField] = useState<{ object: string; source: string; field: WritableSourceField } | null>(null);
   const [fieldReceipts, setFieldReceipts] = useState<Record<string, Partial<Record<WritableSourceField, string>>>>({});
   const [receipts, setReceipts] = useState<Record<string, string>>({});
   const [phase, setPhase] = useState<"idle" | "read" | "scan" | "save">("idle");
-  const [message, setMessage] = useState("Wybierz bazę, z której mają być wyliczane propozycje.");
+  const [message, setMessage] = useState("Propozycje są wyliczane z DigitalOcean.");
   const [resortId, setResortId] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
@@ -51,7 +51,7 @@ function LiveStatuses() {
   async function read() {
     if (!sourceDatabase) { setMessage("Najpierw wybierz bazę do wyliczania propozycji."); return; }
     setPhase("read"); setMessage("");
-    try { const data = await api<Snapshot>("snapshot?database=" + sourceDatabase); setSnapshot(data); setResults([]); setReceipts({}); setFieldReceipts({}); setProgress({ done: 0, total: 0 }); setMessage("Odczytano obie bazy. Propozycje będą liczone z: " + (sourceDatabase === "supabase" ? "Supabase." : "Dropleta.")); }
+    try { const data = await api<Snapshot>("snapshot?database=" + sourceDatabase); setSnapshot(data); setResults([]); setReceipts({}); setFieldReceipts({}); setProgress({ done: 0, total: 0 }); setMessage("Odczytano bazę. Propozycje będą liczone z: " + "DigitalOcean."); }
     catch (e) { setMessage((e as Error).message); }
     finally { setPhase("idle"); }
   }
@@ -182,21 +182,21 @@ function LiveStatuses() {
 
   return <>
     <h1>Aktualizacje statusów</h1>
-    <p>Wybierz bazę do wyliczania propozycji. Obie bazy są odczytywane, a zatwierdzone zmiany są niezależnie wysyłane i potwierdzane w każdej z nich.</p>
-    <div className="tabs" aria-label="Baza do wyliczania propozycji"><b>Baza do wyliczania:</b>{(["supabase","droplet"] as const).map(database=><button key={database} aria-pressed={sourceDatabase===database} disabled={busy} onClick={()=>selectDatabase(database)}>{database==="supabase"?"Supabase":"Droplet"}</button>)}</div>
+    <p>Propozycje są wyliczane z bazy DigitalOcean, a zatwierdzone zmiany zapisują się w tej bazie.</p>
+    <div className="tabs" aria-label="Baza do wyliczania propozycji"><b>Baza do wyliczania:</b>{(["droplet"] as const).map(database=><button key={database} aria-pressed={sourceDatabase===database} disabled={busy} onClick={()=>selectDatabase(database)}>DigitalOcean</button>)}</div>
     <div className="toolbar">
-      <button disabled={busy || !sourceDatabase} onClick={read}>Odśwież obie bazy</button>
+      <button disabled={busy || !sourceDatabase} onClick={read}>Odśwież bazę DigitalOcean</button>
       <button className="primary" disabled={busy || !snapshot || !sourceDatabase} onClick={scan}>Sprawdź źródła{resortId ? " ośrodka" : " wszystkich ośrodków"}</button>
       {(phase === "scan" || phase === "save") && <button onClick={() => { stop.current = true; }}>Zatrzymaj po bieżących operacjach</button>}
       <a href="/admin/baza">Edytuj wpisy ręcznie</a>
     </div>
-    {phase === "read" && <p role="status">Odczytuję obie bazy; propozycje będą liczone z {sourceDatabase === "supabase" ? "Supabase" : "Dropleta"}…</p>}
+    {phase === "read" && <p role="status">Odczytuję DigitalOcean; propozycje będą liczone z Dropleta…</p>}
     {message && <p role="status" aria-live="polite">{message}</p>}
     {progress.total > 0 && <div className="scan-progress"><progress value={progress.done} max={progress.total} aria-label="Postęp sprawdzania źródeł" /><span>{progress.done} / {progress.total} źródeł</span></div>}
     {snapshot && report && <>
       <div className="status-stats"><article><b>{snapshot.resorts.length}</b><small>ośrodków</small></article><article><b>{snapshot.slopes.length}</b><small>tras w bazie</small></article><article><b>{snapshot.lifts.length}</b><small>wyciągów w bazie</small></article><article><b>{proposed.length}</b><small>propozycji zmian</small></article></div>
       <small>Odczyt bazy: {date(snapshot.generated_at)}. {snapshot.sources.length} przypisanych źródeł. Czas pobrania strony nie jest datą aktualizacji danych ośrodka.</small>
-      <div className="database-health"><span>{snapshot.databases?.supabase.ok ? `Supabase: ✓ ${snapshot.databases.supabase.counts.join(" / ")}` : `Supabase: ✗ ${snapshot.databases?.supabase.ok===false?snapshot.databases.supabase.errors.join("; "):"brak odczytu"}`}</span><span>{snapshot.databases?.droplet.ok ? `Droplet: ✓ ${snapshot.databases.droplet.counts.join(" / ")} · różnice w wierszach: ${snapshot.databases.droplet.differences}` : `Droplet: ✗ ${snapshot.databases?.droplet.ok===false?snapshot.databases.droplet.errors.join("; "):"brak odczytu"}`}</span><span>Propozycje liczone z: {snapshot.database==="supabase"?"Supabase":"Dropleta"} (ośrodki / trasy / wyciągi)</span></div>
+      <div className="database-health"><span>Propozycje liczone z: DigitalOcean (ośrodki / trasy / wyciągi)</span></div>
       <div className="toolbar">
         <label>Ośrodek<select value={resortId} disabled={busy} onChange={e => setResortId(e.target.value)}><option value="">Wszystkie ośrodki</option>{snapshot.resorts.map(r => <option key={String(r.id)} value={String(r.id)}>{String(r.name)}</option>)}</select></label>
         <label>Szukaj<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nazwa lub numer trasy, wyciągu…" /></label>

@@ -3,6 +3,7 @@ import { createClient, type User } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { NextResponse, type NextRequest } from "next/server";
 import { allowlisted, HttpError } from "./validation";
+import { digitalOceanAuth } from "./digitalocean";
 
 export const ACCESS_COOKIE = "os_admin_access";
 export const REFRESH_COOKIE = "os_admin_refresh";
@@ -12,7 +13,13 @@ export function publicConfig() {
   if (!url || !key) throw new HttpError(503, "Panel wymaga konfiguracji połączenia Supabase na Vercel.", "CONFIG_REQUIRED");
   return { url, key };
 }
+// Used by the DigitalOcean receiver only; Vercel administrator sessions are
+// verified through the authenticated Droplet API below.
 export function authClient() { const { url, key } = publicConfig(); return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } }); }
+type SessionPayload = { access_token: string; refresh_token: string; expires_in: number };
+export async function authenticateAdmin(action: "login" | "refresh" | "get-user", payload: Record<string, unknown>) {
+  return digitalOceanAuth<{ user: User; session?: SessionPayload }>(action, payload);
+}
 export function adminClient() {
   const { url } = publicConfig();
   const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -26,10 +33,11 @@ export function assertAllowed(user: User) {
 export async function requireAdmin(): Promise<User> {
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
   if (!token) throw new HttpError(401, "Zaloguj się ponownie.", "UNAUTHORIZED");
-  const { data, error } = await authClient().auth.getUser(token);
-  if (error || !data.user) throw new HttpError(401, "Sesja wygasła. Zaloguj się ponownie.", "UNAUTHORIZED");
-  assertAllowed(data.user);
-  return data.user;
+  let result: { user: User };
+  try { result = await authenticateAdmin("get-user", { access_token: token }); }
+  catch { throw new HttpError(401, "Sesja wygasła. Zaloguj się ponownie.", "UNAUTHORIZED"); }
+  assertAllowed(result.user);
+  return result.user;
 }
 export function sameOrigin(request: NextRequest) {
   const origin=request.headers.get("origin");
