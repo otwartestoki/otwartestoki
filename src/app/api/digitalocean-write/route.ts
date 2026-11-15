@@ -24,8 +24,32 @@ export async function POST(request: Request) {
   try {
     const raw = await request.text();
     if (raw.length > 100000) return new Response(null, { status: 413 });
-    const { table, identity, before, patch } = JSON.parse(raw);
+    const payload = JSON.parse(raw);
+    const { table } = payload;
     const spec = tableSchema(table);
+    const db = adminClient();
+    if (payload.operation === "read") {
+      if (payload.action === "list") {
+        const rows = [];
+        for (let start = 0; start < 10000; start += 500) {
+          const { data, error } = await db.from(table).select("*").order(spec.keys[0]).range(start, start + 499);
+          if (error) return new Response(null, { status: 502 });
+          rows.push(...data);
+          if (data.length < 500) return Response.json({ rows }, { headers: { "Cache-Control": "no-store" } });
+        }
+        return new Response(null, { status: 413 });
+      }
+      if (payload.action === "record") {
+        const keys = recordIdentity(spec, payload.identity);
+        let read = db.from(table).select("*");
+        for (const [key, value] of Object.entries(keys)) read = read.eq(key, value);
+        const { data, error } = await read.maybeSingle();
+        if (error) return new Response(null, { status: 502 });
+        return Response.json({ record: data }, { headers: { "Cache-Control": "no-store" } });
+      }
+      return new Response(null, { status: 400 });
+    }
+    const { identity, before, patch } = payload;
     const keys = recordIdentity(spec, identity);
     const fields = Object.keys(patch);
     const allowed = new Set([...spec.fields.map(field => field.key), "updated_at"]);
@@ -36,7 +60,6 @@ export async function POST(request: Request) {
       return new Response(null, { status: 400 });
     }
 
-    const db = adminClient();
     let read = db.from(table).select("*");
     for (const [key, value] of Object.entries(keys)) read = read.eq(key, value);
     const { data: current, error } = await read.single();

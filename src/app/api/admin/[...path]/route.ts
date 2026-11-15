@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { adminClient, assertAllowed, authClient, dbFailure, logoutResponse, REFRESH_COOKIE, requireAdmin, sameOrigin, sessionResponse } from "@/lib/admin/server";
-import { closeResortStep, listRecords, readRecord, revision, saveRecord } from "@/lib/admin/records";
+import { closeResortStep, listRecordsBoth, readRecord, readRecordBoth, revision, saveRecord } from "@/lib/admin/records";
 import { HttpError, normalizeStatus } from "@/lib/admin/validation";
 import { checkSource, databaseSnapshot } from "@/lib/admin/collector";
 export const runtime="nodejs";
@@ -32,8 +32,15 @@ async function handle(request: NextRequest, context: {params:Promise<{path:strin
     if(path==="me" && request.method==="GET") result={email:user.email};
     else if(path==="snapshot" && request.method==="GET") result=await databaseSnapshot();
     else if(path==="check-source" && request.method==="POST") result=await checkSource(body.source_id);
-    else if(path==="records" && request.method==="GET") result={rows:await listRecords(request.nextUrl.searchParams.get("table")||"")};
-    else if(path==="record" && request.method==="POST") { const row=await readRecord(body.table,body.identity); result={record:row,revision:revision(body.table,row)}; }
+    else if(path==="records" && request.method==="GET") {
+      const databases=await listRecordsBoth(request.nextUrl.searchParams.get("table")||"");
+      result={rows:databases.supabase.ok?databases.supabase.rows:[],databases};
+    }
+    else if(path==="record" && request.method==="POST") {
+      const databases=await readRecordBoth(body.table,body.identity);
+      const row=databases.supabase.ok?databases.supabase.record:null;
+      result={record:row,revision:row?revision(body.table,row):null,databases};
+    }
     else if(path==="save" && request.method==="POST") result=await saveRecord(body.table,String(body.revision||""),body.changes,user.id);
     else if(path==="confirm-resort" && request.method==="POST") result=body.status === "zamknięty" ? await closeResortStep(String(body.revision||""),user.id) : await saveRecord("resorts",String(body.revision||""),{status:body.status},user.id,true);
     else if(path==="proposal" && request.method==="POST") {

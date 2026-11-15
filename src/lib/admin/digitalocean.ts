@@ -22,3 +22,21 @@ export function digitalOceanWriter() {
     if (!response.ok) throw new Error("DigitalOcean did not confirm the write");
   };
 }
+
+export async function digitalOceanRead<T>(request: Record<string, unknown>): Promise<T> {
+  const endpoint = process.env.ADMIN_DIGITALOCEAN_WRITE_URL;
+  const token = process.env.ADMIN_DIGITALOCEAN_WRITE_TOKEN;
+  if (!endpoint || !token || !URL.canParse(endpoint) || new URL(endpoint).protocol !== "https:") {
+    throw new HttpError(503, "Brak pełnej konfiguracji odczytu z DigitalOcean.");
+  }
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ ...request, operation: "read" }),
+    cache: "no-store",
+    redirect: "error",
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!response.ok) throw new Error(`DigitalOcean nie potwierdził odczytu (HTTP ${response.status}).`);
+  return response.json() as Promise<T>;
+}

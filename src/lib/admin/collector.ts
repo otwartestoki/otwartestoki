@@ -1,6 +1,7 @@
 import "server-only";
 import catalog from "./source-catalog.json";
-import { listRecords } from "./records";
+import { listRecordsBoth } from "./records";
+import { tableSchema } from "./schema";
 import { parseSource } from "./parsers";
 import type { Snapshot, SourceResult } from "./matching";
 import type { Source } from "./types";
@@ -8,9 +9,37 @@ import { HttpError } from "./validation";
 
 const sources = catalog as Source[];
 export async function databaseSnapshot(): Promise<Snapshot> {
-  const [resorts, slopes, lifts] = await Promise.all([listRecords("resorts"), listRecords("slopes"), listRecords("lifts")]);
-  const ids = new Set(resorts.map(r => String(r.id)));
-  return { generated_at: new Date().toISOString(), resorts, slopes, lifts, sources: sources.filter(s => ids.has(s.resort_id)).map(({ id, resort_id, url, adapter, expected_station, kind, legacy, force_kind }) => ({ id, resort_id, url, adapter, expected_station, kind, legacy, force_kind })) };
+  const tables = ["resorts", "slopes", "lifts"] as const;
+  const [resorts, slopes, lifts] = await Promise.all(tables.map(table => listRecordsBoth(table)));
+  const supabaseRows = [resorts.supabase, slopes.supabase, lifts.supabase];
+  const unavailable = supabaseRows.find(result => !result.ok);
+  if (unavailable && !unavailable.ok) throw new HttpError(503, unavailable.error);
+  const supabase = [resorts.supabase, slopes.supabase, lifts.supabase] as { ok: true; rows: import("./types").Row[] }[];
+  const dropletResults = [resorts.droplet, slopes.droplet, lifts.droplet];
+  const dropletRows = dropletResults.every(result => result.ok)
+    ? dropletResults.map(result => result.ok ? result.rows : [])
+    : null;
+  const counts = (sets: import("./types").Row[][]) => sets.map(rows => rows.length);
+  const differences = dropletRows ? tables.reduce((total, table, index) => {
+    const keys = tableSchema(table).keys;
+    const identity = (row: import("./types").Row) => JSON.stringify(keys.map(key => row[key]));
+    const source = new Map(supabase[index].rows.map(row => [identity(row), row]));
+    const target = new Map(dropletRows[index].map(row => [identity(row), row]));
+    const missing = [...source.keys()].filter(key => !target.has(key)).length;
+    const extra = [...target.keys()].filter(key => !source.has(key)).length;
+    const changed = [...source.keys()].filter(key => target.has(key) && JSON.stringify(source.get(key)) !== JSON.stringify(target.get(key))).length;
+    return total + missing + extra + changed;
+  }, 0) : null;
+  const [supabaseResorts, supabaseSlopes, supabaseLifts] = supabase.map(result => result.rows);
+  const ids = new Set(supabaseResorts.map(r => String(r.id)));
+  return {
+    generated_at: new Date().toISOString(), resorts: supabaseResorts, slopes: supabaseSlopes, lifts: supabaseLifts,
+    sources: sources.filter(s => ids.has(s.resort_id)).map(({ id, resort_id, url, adapter, expected_station, kind, legacy, force_kind }) => ({ id, resort_id, url, adapter, expected_station, kind, legacy, force_kind })),
+    databases: {
+      supabase: { ok: true as const, counts: counts(supabase.map(result => result.rows)) },
+      droplet: dropletRows ? { ok: true as const, counts: counts(dropletRows), differences } : { ok: false as const, errors: dropletResults.map(result => result.ok ? null : result.error).filter((error): error is string => Boolean(error)) },
+    },
+  };
 }
 const canonicalHost = (host: string) => host.toLowerCase().replace(/^www\./, "");
 export async function checkSource(id: unknown): Promise<SourceResult> {

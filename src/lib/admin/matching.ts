@@ -36,7 +36,17 @@ export function freshness(value: string | null, now = Date.now()) {
   const hours = (now - Date.parse(value)) / 3600000;
   return hours < -1 ? "data z przyszłości" : hours > 72 ? "starsze niż 72h" : "do 72h";
 }
-export type Snapshot = { generated_at: string; resorts: Row[]; slopes: Row[]; lifts: Row[]; sources: Source[] };
+export type Snapshot = {
+  generated_at: string;
+  resorts: Row[];
+  slopes: Row[];
+  lifts: Row[];
+  sources: Source[];
+  databases?: {
+    supabase: { ok: true; counts: number[] };
+    droplet: { ok: true; counts: number[]; differences: number | null } | { ok: false; errors: string[] };
+  };
+};
 export type SourceResult = { source: Source; fetched_at: string; observations: Candidate[]; error?: string; station?: { raw: boolean; note: string } };
 
 export function buildReport(snapshot: Snapshot, results: SourceResult[]): Report {

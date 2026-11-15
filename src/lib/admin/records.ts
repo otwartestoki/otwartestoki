@@ -5,7 +5,7 @@ import { tableSchema } from "./schema";
 import { HttpError, normalizeStatus, recordIdentity, validateChanges } from "./validation";
 import type { Row } from "./types";
 import { utcTimestamp } from "../skiAvailability";
-import { digitalOceanWriter } from "./digitalocean";
+import { digitalOceanRead, digitalOceanWriter } from "./digitalocean";
 
 function secret() { const s = process.env.ADMIN_REVISION_SECRET || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY; if (!s) throw new HttpError(503,"Brak konfiguracji serwera."); return s; }
 function signature(s: string) { return createHmac("sha256",secret()).update(s).digest("base64url"); }
@@ -24,6 +24,34 @@ export async function listRecords(table: string) {
   const spec=tableSchema(table); const rows: Row[]=[];
   for(let start=0;start<10000;start+=500) { const {data,error}=await adminClient().from(table).select("*").order(spec.keys[0]).range(start,start+499); if(error) dbFailure(error); rows.push(...data); if(data.length<500) return rows; }
   throw new HttpError(413,"Zbyt wiele wpisów do jednorazowego odczytu.");
+}
+export async function listRecordsBoth(table: string) {
+  const [supabase, droplet] = await Promise.allSettled([
+    listRecords(table),
+    digitalOceanRead<{ rows: Row[] }>({ table, action: "list" }),
+  ]);
+  return {
+    supabase: supabase.status === "fulfilled" ? { ok: true as const, rows: supabase.value } : { ok: false as const, error: "Nie udało się odczytać Supabase." },
+    droplet: droplet.status === "fulfilled" ? { ok: true as const, rows: droplet.value.rows } : { ok: false as const, error: droplet.reason instanceof Error ? droplet.reason.message : "Nie udało się odczytać Dropleta." },
+  };
+}
+export async function readRecordBoth(table: string, identity: unknown) {
+  const spec = tableSchema(table), keys = recordIdentity(spec, identity);
+  const supabaseRead = async () => {
+    let q = adminClient().from(table).select("*");
+    for (const [key, value] of Object.entries(keys)) q = q.eq(key, value);
+    const { data, error } = await q.maybeSingle();
+    if (error) dbFailure(error);
+    return data as Row | null;
+  };
+  const [supabase, droplet] = await Promise.allSettled([
+    supabaseRead(),
+    digitalOceanRead<{ record: Row | null }>({ table, action: "record", identity: keys }),
+  ]);
+  return {
+    supabase: supabase.status === "fulfilled" ? { ok: true as const, record: supabase.value } : { ok: false as const, error: "Nie udało się odczytać Supabase." },
+    droplet: droplet.status === "fulfilled" ? { ok: true as const, record: droplet.value.record } : { ok: false as const, error: droplet.reason instanceof Error ? droplet.reason.message : "Nie udało się odczytać Dropleta." },
+  };
 }
 export async function saveRecord(table: string, token: string, input: unknown, userId: string, confirmResortStatus = false) {
   const spec=tableSchema(table), before=decode(token,table), changes=validateChanges(spec,input,before);

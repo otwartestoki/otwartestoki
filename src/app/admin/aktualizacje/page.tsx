@@ -44,7 +44,7 @@ function LiveStatuses() {
 
   async function read() {
     setPhase("read"); setMessage("");
-    try { const data = await api<Snapshot>("snapshot"); setSnapshot(data); setResults([]); setReceipts({}); setFieldReceipts({}); setProgress({ done: 0, total: 0 }); setMessage("Odczytano aktualny stan Supabase."); }
+    try { const data = await api<Snapshot>("snapshot"); setSnapshot(data); setResults([]); setReceipts({}); setFieldReceipts({}); setProgress({ done: 0, total: 0 }); setMessage(data.databases?.droplet.ok ? "Odczytano Supabase i Droplet. Supabase pozostaje bazą używaną do wyliczania propozycji." : "Odczytano Supabase. Odczyt Dropleta nie powiódł się; szczegóły są pokazane przy stanie baz."); }
     catch (e) { setMessage((e as Error).message); }
     finally { setPhase("idle"); }
   }
@@ -112,9 +112,9 @@ function LiveStatuses() {
     setMessage(`Zapisuję ${field === "name" ? "nazwę" : field === "number" ? "numer / kod" : field === "length_m" ? "długość" : "status"} ze źródła: ${String(value)}…`);
     setFieldReceipts(old => ({ ...old, [receiptKey]: { ...old[receiptKey], [field]: "" } }));
     try {
-      const current = await api("record", { table, identity: { id: Number(row.db_id) } });
+      const current = await api<{record:Row|null;revision:string|null}>("record", { table, identity: { id: Number(row.db_id) } });
       // Compare the displayed snapshot before using the server-signed, fresh revision.
-      if (!row.db_record || Object.entries(row.db_record).some(([key, value]) => JSON.stringify(current.record[key]) !== JSON.stringify(value))) {
+      if (!current.record || !current.revision || !row.db_record || Object.entries(row.db_record).some(([key, value]) => JSON.stringify(current.record?.[key]) !== JSON.stringify(value))) {
         throw new Error("Wpis zmienił się od odczytu strony. Odśwież bazę i porównaj dane ponownie.");
       }
       const saved = await api("save", { table, revision: current.revision, changes: { [field]: value } });
@@ -136,8 +136,8 @@ function LiveStatuses() {
     if (busy) return;
     setPhase("save"); stop.current = false; setMessage("Potwierdzam status narciarski ośrodka…");
     try {
-      const current = await api("record", { table: "resorts", identity: { id: resort.id } });
-      if (Object.entries(resort).some(([key, value]) => JSON.stringify(current.record[key]) !== JSON.stringify(value))) throw new Error("Ośrodek zmienił się od odczytu strony. Odśwież bazę i sprawdź status ponownie.");
+      const current = await api<{record:Row|null;revision:string|null}>("record", { table: "resorts", identity: { id: resort.id } });
+      if (!current.record || !current.revision || Object.entries(resort).some(([key, value]) => JSON.stringify(current.record?.[key]) !== JSON.stringify(value))) throw new Error("Ośrodek zmienił się od odczytu strony. Odśwież bazę i sprawdź status ponownie.");
       let previousRemaining = Infinity;
       const allWrites=new Map<WriteReceipt["database"],WriteReceipt>();
       while (true) {
@@ -174,19 +174,20 @@ function LiveStatuses() {
 
   return <>
     <h1>Aktualizacje statusów</h1>
-    <p>Aktualny obraz bazy Supabase. Sprawdź strony ośrodków, porównaj wyniki i zaakceptuj wybrane zmiany.</p>
+    <p>Odczytujemy Supabase i Droplet. Propozycje statusów są na razie wyliczane z Supabase; stan obu baz i różnice są widoczne poniżej.</p>
     <div className="toolbar">
-      <button disabled={busy} onClick={read}>Odśwież bazę</button>
+      <button disabled={busy} onClick={read}>Odśwież obie bazy</button>
       <button className="primary" disabled={busy || !snapshot} onClick={scan}>Sprawdź źródła{resortId ? " ośrodka" : " wszystkich ośrodków"}</button>
       {(phase === "scan" || phase === "save") && <button onClick={() => { stop.current = true; }}>Zatrzymaj po bieżących operacjach</button>}
       <a href="/admin/baza">Edytuj wpisy ręcznie</a>
     </div>
-    {phase === "read" && <p role="status">Odczytuję bazę Supabase…</p>}
+    {phase === "read" && <p role="status">Odczytuję obie bazy…</p>}
     {message && <p role="status" aria-live="polite">{message}</p>}
     {progress.total > 0 && <div className="scan-progress"><progress value={progress.done} max={progress.total} aria-label="Postęp sprawdzania źródeł" /><span>{progress.done} / {progress.total} źródeł</span></div>}
     {snapshot && report && <>
       <div className="status-stats"><article><b>{snapshot.resorts.length}</b><small>ośrodków</small></article><article><b>{snapshot.slopes.length}</b><small>tras w bazie</small></article><article><b>{snapshot.lifts.length}</b><small>wyciągów w bazie</small></article><article><b>{proposed.length}</b><small>propozycji zmian</small></article></div>
       <small>Odczyt bazy: {date(snapshot.generated_at)}. {snapshot.sources.length} przypisanych źródeł. Czas pobrania strony nie jest datą aktualizacji danych ośrodka.</small>
+      <div className="database-health"><span>Supabase: ✓ {snapshot.databases?.supabase.counts.join(" / ") || "odczytano"} (ośrodki / trasy / wyciągi)</span><span>{snapshot.databases?.droplet.ok === true ? `Droplet: ✓ ${snapshot.databases.droplet.counts.join(" / ")} · różnice w wierszach: ${snapshot.databases.droplet.differences}` : `Droplet: ✗ ${snapshot.databases?.droplet.ok === false ? snapshot.databases.droplet.errors.join("; ") : "brak odczytu"}`}</span></div>
       <div className="toolbar">
         <label>Ośrodek<select value={resortId} disabled={busy} onChange={e => setResortId(e.target.value)}><option value="">Wszystkie ośrodki</option>{snapshot.resorts.map(r => <option key={String(r.id)} value={String(r.id)}>{String(r.name)}</option>)}</select></label>
         <label>Szukaj<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nazwa lub numer trasy, wyciągu…" /></label>
