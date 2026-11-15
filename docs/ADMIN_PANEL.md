@@ -18,10 +18,14 @@ Panel jest częścią tej samej aplikacji Next.js. Adresy po wdrożeniu:
 | `NEXT_PUBLIC_SUPABASE_URL` | URL istniejącego projektu |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | istniejący klucz publiczny |
 | `SUPABASE_SECRET_KEY` | sekret serwerowy Supabase; alternatywnie `SUPABASE_SERVICE_ROLE_KEY` dla starszego klucza |
+| `DROPLET_WRITE_URL` | `https://baza-api.otwartestoki.pl` |
+| `ADMIN_DIGITALOCEAN_RECEIVE_TOKEN` | wspólny token odbiornika, bezpiecznie ustawiony jako sekret Vercel i na Droplecie |
 | `ADMIN_EMAILS` | zatwierdzony e-mail administratora; kolejne oddziel przecinkami |
 | `ADMIN_REVISION_SECRET` | opcjonalny niezależny losowy sekret do podpisywania wersji wpisów |
 
 Sekretów nie dodawaj do zmiennych z prefiksem `NEXT_PUBLIC_`, kodu ani GitHub. Skonfiguruj właściwe środowisko Vercel i wykonaj redeploy. Do podglądu PR ustaw osobno zmienne Preview; zalecana jest osobna testowa baza.
+
+Każdy zapis administratora jest wysyłany niezależnie do obu baz i weryfikowany ponownym odczytem. Odpowiedź pokazuje osobno wynik Supabase i Dropleta. Błąd jednej bazy nie anuluje zapisu w drugiej. Obie instancje muszą mieć zgodne tabele, kolumny, ograniczenia i identyfikatory rekordów. Zalogowanie administratora nadal odbywa się przez Supabase Auth.
 
 ## Raport i zapisy
 

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, Shell } from "../client";
+import { api, Shell, writeSummary } from "../client";
 import SourceComparison from "./SourceComparison";
 import { sourceFieldValue, type WritableSourceField } from "@/lib/admin/comparison";
 import { changed } from "@/lib/admin/validation";
@@ -8,7 +8,7 @@ import { publicSkiStatus, summarizeSlopes } from "@/lib/skiAvailability";
 import { buildReport, type Snapshot, type SourceResult } from "@/lib/admin/matching";
 import type { Candidate, ReportObject, Row, Status } from "@/lib/admin/types";
 
-type ResortConfirmation = { record?: Row; complete?: boolean; remaining?: number; inventory?: { slopes: Row[]; lifts: Row[] } };
+type ResortConfirmation = { record?: Row; complete?: boolean; remaining?: number; inventory?: { slopes: Row[]; lifts: Row[] }; writes?: {database:"supabase"|"droplet";ok:boolean;message:string}[] };
 
 const labels: Record<Status, string> = { open: "otwarte", closed: "zamknięte", partial: "częściowo otwarte", unknown: "brak jednoznacznych danych" };
 const keyOf = (row: ReportObject) => `${row.kind}:${row.db_id}`;
@@ -85,13 +85,13 @@ function LiveStatuses() {
         setSavingKey(key);
         setMessage(`Zapis ${done + 1} z ${rows.length}: ${String(row.name || row.number)}. Nie zamykaj strony.`);
         try {
-          const data = await api("proposal", { table: row.kind === "slope" ? "slopes" : "lifts", id: Number(row.db_id), resort: row.resort_id, before: row.db_status, updated_at: row.db_updated_at, target: row.observed_status });
+          const data = await api<{record:Row;writes?:ResortConfirmation["writes"]}>("proposal", { table: row.kind === "slope" ? "slopes" : "lifts", id: Number(row.db_id), resort: row.resort_id, before: row.db_status, updated_at: row.db_updated_at, target: row.observed_status });
           setSnapshot(old => {
             if (!old) return old;
             const field = row.kind === "slope" ? "slopes" : "lifts";
             return { ...old, [field]: old[field].map((r: Row) => String(r.id) === row.db_id ? data.record : r) };
           });
-          setReceipts(old => ({ ...old, [key]: "Potwierdzono status w bazie." }));
+          setReceipts(old => ({ ...old, [key]: writeSummary(data.writes) }));
           done++;
         } catch (e) {
           setReceipts(old => ({ ...old, [key]: (e as Error).message }));
@@ -122,8 +122,8 @@ function LiveStatuses() {
         const collection = row.kind === "slope" ? "slopes" : "lifts";
         return { ...old, [collection]: old[collection].map(record => String(record.id) === row.db_id ? saved.record : record) };
       });
-      setFieldReceipts(old => ({ ...old, [receiptKey]: { ...old[receiptKey], [field]: "Zapisano i sprawdzono w bazie." } }));
-      setMessage("Wartość ze źródła zapisana i potwierdzona w bazie.");
+      setFieldReceipts(old => ({ ...old, [receiptKey]: { ...old[receiptKey], [field]: writeSummary(saved.writes) } }));
+      setMessage(writeSummary(saved.writes));
     } catch (error) {
       const message = (error as Error).message;
       setFieldReceipts(old => ({ ...old, [receiptKey]: { ...old[receiptKey], [field]: message } }));

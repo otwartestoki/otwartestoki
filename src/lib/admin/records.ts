@@ -1,6 +1,6 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { adminClient, dbFailure } from "./server";
+import { adminClient, dropletWriteConfig, dbFailure } from "./server";
 import { tableSchema } from "./schema";
 import { HttpError, normalizeStatus, recordIdentity, validateChanges } from "./validation";
 import type { Row } from "./types";
@@ -24,25 +24,73 @@ export async function listRecords(table: string) {
   for(let start=0;start<10000;start+=500) { const {data,error}=await adminClient().from(table).select("*").order(spec.keys[0]).range(start,start+499); if(error) dbFailure(error); rows.push(...data); if(data.length<500) return rows; }
   throw new HttpError(413,"Zbyt wiele wpisów do jednorazowego odczytu.");
 }
+type WriteReceipt = { database: "supabase" | "droplet"; ok: boolean; message: string };
+async function saveInDatabase(database: "supabase" | "droplet", db: ReturnType<typeof adminClient>, table: string, before: Row, patch: Row, userId: string) {
+  const spec=tableSchema(table), identity=Object.fromEntries(spec.keys.map(k=>[k,before[k]]));
+  const audit=await db.from("admin_audit").insert({actor:userId,table_name:table,identity,before,changes:patch,state:"prepared"}).select("id").single();
+  if(audit.error) dbFailure(audit.error);
+  let q=db.from(table).update(patch);
+  for(const [k,v] of Object.entries(before)) { if(v===null) q=q.is(k,null); else if(typeof v!=="object") q=q.eq(k,v); }
+  const {data,error}=await q.select();
+  if(error) { await db.from("admin_audit").update({state:"unverified"}).eq("id",audit.data.id); dbFailure(error); }
+  if(data.length!==1) { await db.from("admin_audit").update({state:"conflict"}).eq("id",audit.data.id); throw new HttpError(409,"Wpis zmienił się w tej bazie."); }
+  let currentQuery=db.from(table).select("*");
+  for(const [key,value] of Object.entries(identity)) currentQuery=currentQuery.eq(key,value);
+  const {data:current,error:readError}=await currentQuery.single();
+  if(readError) dbFailure(readError);
+  const verified=Object.entries(patch).every(([k,v])=>k==="updated_at" || (k==="last_checked_at" ? Number.isFinite(utcTimestamp(v)) && utcTimestamp(current[k])===utcTimestamp(v) : JSON.stringify(current[k])===JSON.stringify(v)));
+  const {error:logError}=await db.from("admin_audit").update({state:verified?"verified":"unverified",after:current}).eq("id",audit.data.id);
+  if(logError || !verified) throw new HttpError(502,"Zapis wysłany, ale niepotwierdzony odczytem.");
+  return { current: current as Row, receipt: { database, ok:true, message:"Zapis potwierdzony odczytem." } as WriteReceipt };
+}
+
+async function saveOnDroplet(table: string, before: Row, patch: Row) {
+  const { url, token } = dropletWriteConfig();
+  const spec = tableSchema(table);
+  const identity = Object.fromEntries(spec.keys.map(key => [key, before[key]]));
+  let response: Response;
+  try {
+    response = await fetch(`${url}/api/digitalocean-write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ table, identity, before, patch }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(12000),
+    });
+  } catch {
+    throw new HttpError(502, "Droplet nie odpowiedział na zapis.", "DROPLET_WRITE_FAILED");
+  }
+  if (response.status !== 204) {
+    const messages: Record<number, string> = {
+      401: "Droplet odrzucił token zapisu.",
+      409: "Rekord na Droplecie zmienił się albo zapis nie przeszedł weryfikacji.",
+      413: "Zapis jest za duży dla Dropleta.",
+    };
+    throw new HttpError(502, messages[response.status] ?? `Droplet odrzucił zapis (HTTP ${response.status}).`, "DROPLET_WRITE_FAILED");
+  }
+}
+
 export async function saveRecord(table: string, token: string, input: unknown, userId: string, confirmResortStatus = false) {
   const spec=tableSchema(table), before=decode(token,table), changes=validateChanges(spec,input,before);
   if (confirmResortStatus) {
     if (table !== "resorts" || !["otwarty", "zamknięty"].includes(String((input as Row).status))) throw new HttpError(400, "Nieprawidłowe potwierdzenie statusu ośrodka.");
     changes.last_checked_at = new Date().toISOString();
   } else if (table === "resorts" && "status" in changes) changes.last_checked_at = new Date().toISOString();
-  if(!Object.keys(changes).length) return {record:before,revision:revision(table,before)};
-  const db=adminClient(); const {data:audit,error:auditError}=await db.from("admin_audit").insert({actor:userId,table_name:table,identity:Object.fromEntries(spec.keys.map(k=>[k,before[k]])),before,changes,state:"prepared"}).select("id").single(); if(auditError) dbFailure(auditError);
+  if(!Object.keys(changes).length) return {record:before,revision:revision(table,before),writes:[] as WriteReceipt[]};
   const patch={...changes}; if("updated_at" in before) patch.updated_at=new Date().toISOString();
-  let q=db.from(table).update(patch);
-  for(const [k,v] of Object.entries(before)) { if(v===null) q=q.is(k,null); else if(typeof v!=="object") q=q.eq(k,v); }
-  const {data,error}=await q.select();
-  if(error) { await db.from("admin_audit").update({state:"unverified"}).eq("id",audit.id); dbFailure(error); }
-  if(data.length!==1) { await db.from("admin_audit").update({state:"conflict"}).eq("id",audit.id); throw new HttpError(409,"Wpis zmienił się w bazie. Odczytaj go ponownie."); }
-  const current=await readRecord(table,Object.fromEntries(spec.keys.map(k=>[k,before[k]])));
-  const verified=Object.entries(patch).every(([k,v])=>k==="updated_at" || (k==="last_checked_at" ? Number.isFinite(utcTimestamp(v)) && utcTimestamp(current[k])===utcTimestamp(v) : JSON.stringify(current[k])===JSON.stringify(v)));
-  const {error:logError}=await db.from("admin_audit").update({state:verified?"verified":"unverified",after:current}).eq("id",audit.id);
-  if(logError || !verified) throw new HttpError(502,"Zapis wysłany, ale potwierdzenie jest niepełne. Odczytaj wpis i sprawdź historię.");
-  return {record:current,revision:revision(table,current)};
+  const targets = [
+    { database:"supabase" as const, save:()=>saveInDatabase("supabase",adminClient(),table,before,patch,userId) },
+    { database:"droplet" as const, save:async()=>{await saveOnDroplet(table,before,patch); return {current:{...before,...patch},receipt:{database:"droplet" as const,ok:true,message:"Zapis potwierdzony przez Droplet."}};} },
+  ];
+  const outcomes=await Promise.all(targets.map(async target=>{
+    try { return await target.save(); }
+    catch(error) { return { error, receipt:{database:target.database,ok:false,message:error instanceof Error?error.message:"Błąd zapisu."} as WriteReceipt }; }
+  }));
+  const writes=outcomes.map(outcome=>outcome.receipt);
+  const successful=outcomes.find(outcome=>"current" in outcome);
+  if(!successful || !("current" in successful)) throw new HttpError(502,`Nie udał się zapis do żadnej bazy. ${writes.map(write=>`${write.database}: ${write.message}`).join(" · ")}`);
+  const current=successful.current;
+  return {record:current,revision:revision(table,current),writes};
 }
 
 

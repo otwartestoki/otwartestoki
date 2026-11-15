@@ -19,6 +19,12 @@ export function adminClient() {
   if (!key) throw new HttpError(503, "Brak serwerowego klucza Supabase w ustawieniach Vercel.", "CONFIG_REQUIRED");
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
+export function dropletWriteConfig() {
+  const url = process.env.DROPLET_WRITE_URL;
+  const token = process.env.ADMIN_DIGITALOCEAN_RECEIVE_TOKEN;
+  if (!url || !token) throw new HttpError(503, "Brak konfiguracji bezpiecznego zapisu na Droplet.", "DROPLET_CONFIG_REQUIRED");
+  return { url: url.replace(/\/$/, ""), token };
+}
 export function assertAllowed(user: User) {
   if (!process.env.ADMIN_EMAILS) throw new HttpError(503, "Brak listy administratorów ADMIN_EMAILS.", "CONFIG_REQUIRED");
   if (!allowlisted(user.email, Boolean(user.email_confirmed_at), process.env.ADMIN_EMAILS)) throw new HttpError(403, "To konto nie ma dostępu do panelu.", "FORBIDDEN");
