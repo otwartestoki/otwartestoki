@@ -1,4 +1,4 @@
-import type { Candidate, Report, ReportObject, Resort, Row, Source, Status } from "./types";
+import type { Candidate, DatabaseSource, Report, ReportObject, Resort, Row, Source, Status } from "./types";
 import { normalizeStatus } from "./validation";
 
 export function norm(value: unknown): string {
@@ -38,13 +38,14 @@ export function freshness(value: string | null, now = Date.now()) {
 }
 export type Snapshot = {
   generated_at: string;
+  database: DatabaseSource;
   resorts: Row[];
   slopes: Row[];
   lifts: Row[];
   sources: Source[];
   databases?: {
-    supabase: { ok: true; counts: number[] };
-    droplet: { ok: true; counts: number[]; differences: number | null } | { ok: false; errors: string[] };
+    supabase: { ok: true; counts: (number|null)[] } | { ok: false; errors: string[] };
+    droplet: { ok: true; counts: (number|null)[]; differences: number | null } | { ok: false; errors: string[] };
   };
 };
 export type SourceResult = { source: Source; fetched_at: string; observations: Candidate[]; error?: string; station?: { raw: boolean; note: string } };

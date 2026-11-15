@@ -4,40 +4,40 @@ import { listRecordsBoth } from "./records";
 import { tableSchema } from "./schema";
 import { parseSource } from "./parsers";
 import type { Snapshot, SourceResult } from "./matching";
-import type { Source } from "./types";
+import type { DatabaseSource, Row, Source } from "./types";
 import { HttpError } from "./validation";
 
 const sources = catalog as Source[];
-export async function databaseSnapshot(): Promise<Snapshot> {
+export async function databaseSnapshot(source: DatabaseSource): Promise<Snapshot> {
   const tables = ["resorts", "slopes", "lifts"] as const;
   const [resorts, slopes, lifts] = await Promise.all(tables.map(table => listRecordsBoth(table)));
-  const supabaseRows = [resorts.supabase, slopes.supabase, lifts.supabase];
-  const unavailable = supabaseRows.find(result => !result.ok);
-  if (unavailable && !unavailable.ok) throw new HttpError(503, unavailable.error);
-  const supabase = [resorts.supabase, slopes.supabase, lifts.supabase] as { ok: true; rows: import("./types").Row[] }[];
+  const supabaseResults = [resorts.supabase, slopes.supabase, lifts.supabase];
   const dropletResults = [resorts.droplet, slopes.droplet, lifts.droplet];
-  const dropletRows = dropletResults.every(result => result.ok)
-    ? dropletResults.map(result => result.ok ? result.rows : [])
-    : null;
-  const counts = (sets: import("./types").Row[][]) => sets.map(rows => rows.length);
-  const differences = dropletRows ? tables.reduce((total, table, index) => {
+  const selectedResults = source === "supabase" ? supabaseResults : dropletResults;
+  const unavailable = selectedResults.find(result => !result.ok);
+  if (unavailable && !unavailable.ok) throw new HttpError(503, unavailable.error);
+  const supabaseRows = supabaseResults.map(result => result.ok ? result.rows : null);
+  const dropletRows = dropletResults.map(result => result.ok ? result.rows : null);
+  const selectedRows = (source === "supabase" ? supabaseRows : dropletRows) as Row[][];
+  const counts = (sets: (Row[] | null)[]) => sets.map(rows => rows?.length ?? null);
+  const differences = supabaseRows.every((rows): rows is Row[] => rows !== null) && dropletRows.every((rows): rows is Row[] => rows !== null) ? tables.reduce((total, table, index) => {
     const keys = tableSchema(table).keys;
-    const identity = (row: import("./types").Row) => JSON.stringify(keys.map(key => row[key]));
-    const source = new Map(supabase[index].rows.map(row => [identity(row), row]));
-    const target = new Map(dropletRows[index].map(row => [identity(row), row]));
-    const missing = [...source.keys()].filter(key => !target.has(key)).length;
-    const extra = [...target.keys()].filter(key => !source.has(key)).length;
-    const changed = [...source.keys()].filter(key => target.has(key) && JSON.stringify(source.get(key)) !== JSON.stringify(target.get(key))).length;
+    const identity = (row: Row) => JSON.stringify(keys.map(key => row[key]));
+    const sourceRows = new Map(supabaseRows[index].map(row => [identity(row), row]));
+    const targetRows = new Map(dropletRows[index].map(row => [identity(row), row]));
+    const missing = [...sourceRows.keys()].filter(key => !targetRows.has(key)).length;
+    const extra = [...targetRows.keys()].filter(key => !sourceRows.has(key)).length;
+    const changed = [...sourceRows.keys()].filter(key => targetRows.has(key) && JSON.stringify(sourceRows.get(key)) !== JSON.stringify(targetRows.get(key))).length;
     return total + missing + extra + changed;
   }, 0) : null;
-  const [supabaseResorts, supabaseSlopes, supabaseLifts] = supabase.map(result => result.rows);
-  const ids = new Set(supabaseResorts.map(r => String(r.id)));
+  const [selectedResorts, selectedSlopes, selectedLifts] = selectedRows;
+  const ids = new Set(selectedResorts.map(r => String(r.id)));
   return {
-    generated_at: new Date().toISOString(), resorts: supabaseResorts, slopes: supabaseSlopes, lifts: supabaseLifts,
+    generated_at: new Date().toISOString(), database: source, resorts: selectedResorts, slopes: selectedSlopes, lifts: selectedLifts,
     sources: sources.filter(s => ids.has(s.resort_id)).map(({ id, resort_id, url, adapter, expected_station, kind, legacy, force_kind }) => ({ id, resort_id, url, adapter, expected_station, kind, legacy, force_kind })),
     databases: {
-      supabase: { ok: true as const, counts: counts(supabase.map(result => result.rows)) },
-      droplet: dropletRows ? { ok: true as const, counts: counts(dropletRows), differences } : { ok: false as const, errors: dropletResults.map(result => result.ok ? null : result.error).filter((error): error is string => Boolean(error)) },
+      supabase: supabaseRows.every((rows): rows is Row[] => rows !== null) ? { ok: true as const, counts: counts(supabaseRows) } : { ok: false as const, errors: supabaseResults.map(result => result.ok ? null : result.error).filter((error): error is string => Boolean(error)) },
+      droplet: dropletRows.every((rows): rows is Row[] => rows !== null) ? { ok: true as const, counts: counts(dropletRows), differences } : { ok: false as const, errors: dropletResults.map(result => result.ok ? null : result.error).filter((error): error is string => Boolean(error)) },
     },
   };
 }

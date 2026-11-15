@@ -1,5 +1,6 @@
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type Row = Record<string, Json>;
+export type DatabaseSource = "supabase" | "droplet";
 export type Field = { key: string; label: string; type: string; required?: boolean; options?: string[] };
 export type TableSchema = { label: string; keys: string[]; title: string; resort?: string; fields: Field[] };
 export type Status = "open" | "closed" | "partial" | "unknown";

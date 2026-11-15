@@ -51,6 +51,7 @@ export async function POST(request: Request) {
     }
     const { identity, before, patch } = payload;
     const keys = recordIdentity(spec, identity);
+    if (!before || typeof before !== "object") return new Response(null, { status: 409 });
     const fields = Object.keys(patch);
     const allowed = new Set([...spec.fields.map(field => field.key), "updated_at"]);
     if (table === "resorts") allowed.add("last_checked_at");
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
     if (error || !current) return new Response(null, { status: 409 });
     const changed = fields.filter(key => key !== "updated_at");
     if (changed.every(key => equal(key, current[key], patch[key]))) {
-      return new Response(null, { status: 204 });
+      return Response.json({ record: current }, { headers: { "Cache-Control": "no-store" } });
     }
     if (changed.some(key => !equal(key, current[key], before[key]) &&
       !equal(key, current[key], patch[key]))) {
@@ -79,7 +80,9 @@ export async function POST(request: Request) {
     }
     const result = await update.select().single();
     const confirmed = !result.error && changed.every(key => equal(key, result.data[key], patch[key]));
-    return new Response(null, { status: confirmed ? 204 : 409 });
+    return confirmed
+      ? Response.json({ record: result.data }, { headers: { "Cache-Control": "no-store" } })
+      : new Response(null, { status: 409 });
   } catch {
     return new Response(null, { status: 400 });
   }

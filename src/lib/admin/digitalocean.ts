@@ -10,7 +10,7 @@ export function digitalOceanWriter() {
     throw new HttpError(503, "Brak pełnej konfiguracji zapisu na DigitalOcean.");
   }
 
-  return async (table: string, identity: Row, before: Row, patch: Row) => {
+  return async (table: string, identity: Row, before: Row | null, patch: Row): Promise<Row> => {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -20,6 +20,9 @@ export function digitalOceanWriter() {
       signal: AbortSignal.timeout(6000),
     });
     if (!response.ok) throw new Error("DigitalOcean did not confirm the write");
+    const result = await response.json() as { record?: Row };
+    if (!result.record) throw new Error("DigitalOcean did not return the verified record");
+    return result.record;
   };
 }
 

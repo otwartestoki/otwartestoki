@@ -6,7 +6,7 @@ import { sourceFieldValue, type WritableSourceField } from "@/lib/admin/comparis
 import { changed } from "@/lib/admin/validation";
 import { publicSkiStatus, summarizeSlopes } from "@/lib/skiAvailability";
 import { buildReport, type Snapshot, type SourceResult } from "@/lib/admin/matching";
-import type { Candidate, ReportObject, Row, Status } from "@/lib/admin/types";
+import type { Candidate, DatabaseSource, ReportObject, Row, Status } from "@/lib/admin/types";
 
 type WriteReceipt={database:"supabase"|"droplet";ok:boolean;message:string};
 type ResortConfirmation = { record?: Row; complete?: boolean; remaining?: number; inventory?: { slopes: Row[]; lifts: Row[] }; writes?:WriteReceipt[] };
@@ -20,13 +20,14 @@ export default function Page() { return <Shell><LiveStatuses /></Shell>; }
 
 function LiveStatuses() {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [sourceDatabase, setSourceDatabase] = useState<DatabaseSource | null>(null);
   const [results, setResults] = useState<SourceResult[]>([]);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [activeField, setActiveField] = useState<{ object: string; source: string; field: WritableSourceField } | null>(null);
   const [fieldReceipts, setFieldReceipts] = useState<Record<string, Partial<Record<WritableSourceField, string>>>>({});
   const [receipts, setReceipts] = useState<Record<string, string>>({});
-  const [phase, setPhase] = useState<"idle" | "read" | "scan" | "save">("read");
-  const [message, setMessage] = useState("");
+  const [phase, setPhase] = useState<"idle" | "read" | "scan" | "save">("idle");
+  const [message, setMessage] = useState("Wybierz bazę, z której mają być wyliczane propozycje.");
   const [resortId, setResortId] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
@@ -36,23 +37,30 @@ function LiveStatuses() {
   const skiing = useMemo(() => summarizeSlopes(snapshot?.slopes.map(row => ({ resort: String(row.resort), status: typeof row.status === "string" ? row.status : null })) || []), [snapshot]);
   const report = useMemo(() => snapshot ? buildReport(snapshot, results) : null, [snapshot, results]);
 
+  function selectDatabase(database: DatabaseSource) {
+    setPhase("read"); setSnapshot(null); setResults([]); setReceipts({}); setFieldReceipts({}); setSourceDatabase(database); setMessage("Odczytuję wybraną bazę…");
+  }
+
   useEffect(() => {
+    if (!sourceDatabase) return;
     let active = true;
-    api<Snapshot>("snapshot").then(data => { if (active) setSnapshot(data); }).catch(e => { if (active) setMessage(e.message); }).finally(() => { if (active) setPhase("idle"); });
+    api<Snapshot>("snapshot?database=" + sourceDatabase).then(data => { if (active) setSnapshot(data); }).catch(e => { if (active) setMessage(e.message); }).finally(() => { if (active) setPhase("idle"); });
     return () => { active = false; stop.current = true; };
-  }, []);
+  }, [sourceDatabase]);
 
   async function read() {
+    if (!sourceDatabase) { setMessage("Najpierw wybierz bazę do wyliczania propozycji."); return; }
     setPhase("read"); setMessage("");
-    try { const data = await api<Snapshot>("snapshot"); setSnapshot(data); setResults([]); setReceipts({}); setFieldReceipts({}); setProgress({ done: 0, total: 0 }); setMessage(data.databases?.droplet.ok ? "Odczytano Supabase i Droplet. Supabase pozostaje bazą używaną do wyliczania propozycji." : "Odczytano Supabase. Odczyt Dropleta nie powiódł się; szczegóły są pokazane przy stanie baz."); }
+    try { const data = await api<Snapshot>("snapshot?database=" + sourceDatabase); setSnapshot(data); setResults([]); setReceipts({}); setFieldReceipts({}); setProgress({ done: 0, total: 0 }); setMessage("Odczytano obie bazy. Propozycje będą liczone z: " + (sourceDatabase === "supabase" ? "Supabase." : "Dropleta.")); }
     catch (e) { setMessage((e as Error).message); }
     finally { setPhase("idle"); }
   }
 
   async function scan() {
-    setPhase("scan"); stop.current = false; setMessage("Odczytuję aktualny stan bazy przed sprawdzeniem stron…"); setReceipts({}); setFieldReceipts({}); setResults([]);
+    if (!sourceDatabase) { setMessage("Najpierw wybierz bazę do wyliczania propozycji."); return; }
+    setPhase("scan"); stop.current = false; setMessage("Odczytuję wybraną bazę przed sprawdzeniem stron…"); setReceipts({}); setFieldReceipts({}); setResults([]);
     try {
-      const data = await api<Snapshot>("snapshot"); setSnapshot(data);
+      const data = await api<Snapshot>("snapshot?database=" + sourceDatabase); setSnapshot(data);
       const sources = data.sources.filter(s => !resortId || s.resort_id === resortId);
       setProgress({ done: 0, total: sources.length });
       if (!sources.length) { setMessage("Ten ośrodek nie ma jeszcze automatycznego źródła. Możesz otworzyć jego stronę i użyć edytora bazy."); return; }
@@ -86,7 +94,7 @@ function LiveStatuses() {
         setSavingKey(key);
         setMessage(`Zapis ${done + 1} z ${rows.length}: ${String(row.name || row.number)}. Nie zamykaj strony.`);
         try {
-          const data = await api<{record:Row;writes?:WriteReceipt[]}>("proposal", { table: row.kind === "slope" ? "slopes" : "lifts", id: Number(row.db_id), resort: row.resort_id, before: row.db_status, updated_at: row.db_updated_at, target: row.observed_status });
+          const data = await api<{record:Row;writes?:WriteReceipt[]}>("proposal", { table: row.kind === "slope" ? "slopes" : "lifts", id: Number(row.db_id), resort: row.resort_id, before: row.db_status, updated_at: row.db_updated_at, target: row.observed_status, database: sourceDatabase });
           setSnapshot(old => {
             if (!old) return old;
             const field = row.kind === "slope" ? "slopes" : "lifts";
@@ -112,7 +120,7 @@ function LiveStatuses() {
     setMessage(`Zapisuję ${field === "name" ? "nazwę" : field === "number" ? "numer / kod" : field === "length_m" ? "długość" : "status"} ze źródła: ${String(value)}…`);
     setFieldReceipts(old => ({ ...old, [receiptKey]: { ...old[receiptKey], [field]: "" } }));
     try {
-      const current = await api<{record:Row|null;revision:string|null}>("record", { table, identity: { id: Number(row.db_id) } });
+      const current = await api<{record:Row|null;revision:string|null}>("record", { table, database: sourceDatabase, identity: { id: Number(row.db_id) } });
       // Compare the displayed snapshot before using the server-signed, fresh revision.
       if (!current.record || !current.revision || !row.db_record || Object.entries(row.db_record).some(([key, value]) => JSON.stringify(current.record?.[key]) !== JSON.stringify(value))) {
         throw new Error("Wpis zmienił się od odczytu strony. Odśwież bazę i porównaj dane ponownie.");
@@ -136,7 +144,7 @@ function LiveStatuses() {
     if (busy) return;
     setPhase("save"); stop.current = false; setMessage("Potwierdzam status narciarski ośrodka…");
     try {
-      const current = await api<{record:Row|null;revision:string|null}>("record", { table: "resorts", identity: { id: resort.id } });
+      const current = await api<{record:Row|null;revision:string|null}>("record", { table: "resorts", database: sourceDatabase, identity: { id: resort.id } });
       if (!current.record || !current.revision || Object.entries(resort).some(([key, value]) => JSON.stringify(current.record?.[key]) !== JSON.stringify(value))) throw new Error("Ośrodek zmienił się od odczytu strony. Odśwież bazę i sprawdź status ponownie.");
       let previousRemaining = Infinity;
       const allWrites=new Map<WriteReceipt["database"],WriteReceipt>();
@@ -161,7 +169,7 @@ function LiveStatuses() {
       if (status === "zamknięty") setResults(old => old.filter(result => result.source.resort_id !== resort.id));
       setMessage(`${status === "zamknięty" ? "Zamknięto ośrodek oraz wszystkie jego trasy i wyciągi." : "Potwierdzono narciarskie otwarcie ośrodka."} ${writeSummary([...allWrites.values()])}`);
     } catch (error) {
-      try { setSnapshot(await api<Snapshot>("snapshot")); } catch { /* Keep the last confirmed snapshot if refreshing fails. */ }
+      try { if(sourceDatabase) setSnapshot(await api<Snapshot>("snapshot?database="+sourceDatabase)); } catch { /* Keep the last confirmed snapshot if refreshing fails. */ }
       setMessage(status === "zamknięty" ? `Zamykanie nie zostało zakończone. Część wpisów mogła zostać zapisana. ${(error as Error).message} Ponów zamknięcie, aby dokończyć pozostałe wpisy.` : (error as Error).message);
     }
     finally { setPhase("idle"); }
@@ -174,20 +182,21 @@ function LiveStatuses() {
 
   return <>
     <h1>Aktualizacje statusów</h1>
-    <p>Odczytujemy Supabase i Droplet. Propozycje statusów są na razie wyliczane z Supabase; stan obu baz i różnice są widoczne poniżej.</p>
+    <p>Wybierz bazę do wyliczania propozycji. Obie bazy są odczytywane, a zatwierdzone zmiany są niezależnie wysyłane i potwierdzane w każdej z nich.</p>
+    <div className="tabs" aria-label="Baza do wyliczania propozycji"><b>Baza do wyliczania:</b>{(["supabase","droplet"] as const).map(database=><button key={database} aria-pressed={sourceDatabase===database} disabled={busy} onClick={()=>selectDatabase(database)}>{database==="supabase"?"Supabase":"Droplet"}</button>)}</div>
     <div className="toolbar">
-      <button disabled={busy} onClick={read}>Odśwież obie bazy</button>
-      <button className="primary" disabled={busy || !snapshot} onClick={scan}>Sprawdź źródła{resortId ? " ośrodka" : " wszystkich ośrodków"}</button>
+      <button disabled={busy || !sourceDatabase} onClick={read}>Odśwież obie bazy</button>
+      <button className="primary" disabled={busy || !snapshot || !sourceDatabase} onClick={scan}>Sprawdź źródła{resortId ? " ośrodka" : " wszystkich ośrodków"}</button>
       {(phase === "scan" || phase === "save") && <button onClick={() => { stop.current = true; }}>Zatrzymaj po bieżących operacjach</button>}
       <a href="/admin/baza">Edytuj wpisy ręcznie</a>
     </div>
-    {phase === "read" && <p role="status">Odczytuję obie bazy…</p>}
+    {phase === "read" && <p role="status">Odczytuję obie bazy; propozycje będą liczone z {sourceDatabase === "supabase" ? "Supabase" : "Dropleta"}…</p>}
     {message && <p role="status" aria-live="polite">{message}</p>}
     {progress.total > 0 && <div className="scan-progress"><progress value={progress.done} max={progress.total} aria-label="Postęp sprawdzania źródeł" /><span>{progress.done} / {progress.total} źródeł</span></div>}
     {snapshot && report && <>
       <div className="status-stats"><article><b>{snapshot.resorts.length}</b><small>ośrodków</small></article><article><b>{snapshot.slopes.length}</b><small>tras w bazie</small></article><article><b>{snapshot.lifts.length}</b><small>wyciągów w bazie</small></article><article><b>{proposed.length}</b><small>propozycji zmian</small></article></div>
       <small>Odczyt bazy: {date(snapshot.generated_at)}. {snapshot.sources.length} przypisanych źródeł. Czas pobrania strony nie jest datą aktualizacji danych ośrodka.</small>
-      <div className="database-health"><span>Supabase: ✓ {snapshot.databases?.supabase.counts.join(" / ") || "odczytano"} (ośrodki / trasy / wyciągi)</span><span>{snapshot.databases?.droplet.ok === true ? `Droplet: ✓ ${snapshot.databases.droplet.counts.join(" / ")} · różnice w wierszach: ${snapshot.databases.droplet.differences}` : `Droplet: ✗ ${snapshot.databases?.droplet.ok === false ? snapshot.databases.droplet.errors.join("; ") : "brak odczytu"}`}</span></div>
+      <div className="database-health"><span>{snapshot.databases?.supabase.ok ? `Supabase: ✓ ${snapshot.databases.supabase.counts.join(" / ")}` : `Supabase: ✗ ${snapshot.databases?.supabase.ok===false?snapshot.databases.supabase.errors.join("; "):"brak odczytu"}`}</span><span>{snapshot.databases?.droplet.ok ? `Droplet: ✓ ${snapshot.databases.droplet.counts.join(" / ")} · różnice w wierszach: ${snapshot.databases.droplet.differences}` : `Droplet: ✗ ${snapshot.databases?.droplet.ok===false?snapshot.databases.droplet.errors.join("; "):"brak odczytu"}`}</span><span>Propozycje liczone z: {snapshot.database==="supabase"?"Supabase":"Dropleta"} (ośrodki / trasy / wyciągi)</span></div>
       <div className="toolbar">
         <label>Ośrodek<select value={resortId} disabled={busy} onChange={e => setResortId(e.target.value)}><option value="">Wszystkie ośrodki</option>{snapshot.resorts.map(r => <option key={String(r.id)} value={String(r.id)}>{String(r.name)}</option>)}</select></label>
         <label>Szukaj<input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nazwa lub numer trasy, wyciągu…" /></label>
