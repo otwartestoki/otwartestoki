@@ -31,7 +31,7 @@ export async function saveRecord(table: string, token: string, input: unknown, u
     if (table !== "resorts" || !["otwarty", "zamknięty"].includes(String((input as Row).status))) throw new HttpError(400, "Nieprawidłowe potwierdzenie statusu ośrodka.");
     changes.last_checked_at = new Date().toISOString();
   } else if (table === "resorts" && "status" in changes) changes.last_checked_at = new Date().toISOString();
-  if(!Object.keys(changes).length) return {record:before,revision:revision(table,before)};
+    if(!Object.keys(changes).length) return {record:before,revision:revision(table,before),writes:[]};
   const mirror = digitalOceanWriter();
   const identity = Object.fromEntries(spec.keys.map(key => [key, before[key]]));
   const db=adminClient(); const {data:audit,error:auditError}=await db.from("admin_audit").insert({actor:userId,table_name:table,identity,before,changes,state:"prepared"}).select("id").single(); if(auditError) dbFailure(auditError);
@@ -48,20 +48,17 @@ export async function saveRecord(table: string, token: string, input: unknown, u
     if(logError || !verified) throw new HttpError(502,"Zapis wysłany, ale potwierdzenie jest niepełne. Odczytaj wpis i sprawdź historię.");
     return {record:current,revision:revision(table,current)};
   };
-  if (!mirror) return writeLocal();
-
-  const [supabase, digitalOcean] = await Promise.allSettled([
-    writeLocal(),
-    mirror(table, identity, before, patch),
-  ]);
-  if (supabase.status === "fulfilled" && digitalOcean.status === "fulfilled") return supabase.value;
-  if (supabase.status === "fulfilled") {
-    throw new HttpError(502, "Supabase zapisał zmianę. DigitalOcean nie potwierdził zapisu.", "DIGITALOCEAN_UNCONFIRMED");
-  }
-  if (digitalOcean.status === "fulfilled") {
-    throw new HttpError(502, "DigitalOcean zapisał zmianę. Supabase nie potwierdził zapisu.", "SUPABASE_UNCONFIRMED");
-  }
-  throw new HttpError(502, "Obie bazy nie potwierdziły zapisu. Sprawdź aktualny stan.", "WRITE_UNCONFIRMED");
+    const [supabase, digitalOcean] = await Promise.allSettled([
+      writeLocal(),
+      mirror ? mirror(table, identity, before, patch) : Promise.reject(new Error("Brak konfiguracji zapisu na DigitalOcean.")),
+    ]);
+    const writes = [
+      {database:"supabase" as const,ok:supabase.status==="fulfilled",message:supabase.status==="fulfilled"?"Zapis potwierdzony odczytem.":"Supabase nie potwierdził zapisu."},
+      {database:"droplet" as const,ok:digitalOcean.status==="fulfilled",message:digitalOcean.status==="fulfilled"?"Zapis potwierdzony odczytem.":digitalOcean.reason instanceof Error?digitalOcean.reason.message:"Droplet nie potwierdził zapisu."},
+    ];
+    if (supabase.status === "rejected" && digitalOcean.status === "rejected") throw new HttpError(502, "Żadna baza nie potwierdziła zapisu. Sprawdź oba statusy baz przed ponowieniem.", "WRITE_UNCONFIRMED");
+    const saved = supabase.status === "fulfilled" ? supabase.value : {record:{...before,...patch},revision:revision(table,{...before,...patch})};
+    return {...saved,writes};
 }
 
 
@@ -88,13 +85,24 @@ export async function closeResortStep(token: string, userId: string) {
   if (Object.entries(before).some(([key, value]) => JSON.stringify(current[key]) !== JSON.stringify(value))) throw new HttpError(409, "Ośrodek zmienił się w bazie. Odśwież dane przed zamknięciem.");
   const inventory = await resortInventory(before.id);
   const pending = (["slopes", "lifts"] as const).flatMap(table => inventory[table].filter(row => normalizeStatus(row.status) !== "closed").map(row => ({ table, row })));
-  for (const { table, row } of pending.slice(0, 3)) await saveRecord(table, revision(table, row), { status: "zamknięta" }, userId);
+  const writes = new Map<string, {database:"supabase"|"droplet";ok:boolean;message:string}>();
+  function collect(receipts: {database:"supabase"|"droplet";ok:boolean;message:string}[] = []) {
+    for(const receipt of receipts) {
+      const previous=writes.get(receipt.database);
+      writes.set(receipt.database,{...receipt,ok:receipt.ok && (previous?.ok ?? true),message:receipt.ok?(previous?.message ?? receipt.message):receipt.message});
+    }
+  }
+  for (const { table, row } of pending.slice(0, 3)) {
+    const saved=await saveRecord(table, revision(table, row), { status: "zamknięta" }, userId);
+    collect(saved.writes);
+  }
   const after = await resortInventory(before.id);
   const remaining = [...after.slopes, ...after.lifts].filter(row => normalizeStatus(row.status) !== "closed").length;
-  if (remaining) return { complete: false as const, remaining, inventory: after };
+  if (remaining) return { complete: false as const, remaining, inventory: after, writes:[...writes.values()] };
   // Confirm the resort only after every slope and lift has been read back as closed.
   const saved = await saveRecord("resorts", token, { status: "zamknięty" }, userId, true);
+  collect(saved.writes);
   const verified = await resortInventory(before.id);
   if ([...verified.slopes, ...verified.lifts].some(row => normalizeStatus(row.status) !== "closed")) throw new HttpError(409, "Status obiektu zmienił się podczas zamykania. Odśwież bazę i ponów zamknięcie ośrodka.");
-  return { ...saved, complete: true as const, remaining: 0, inventory: verified };
+  return { ...saved, writes:[...writes.values()], complete: true as const, remaining: 0, inventory: verified };
 }

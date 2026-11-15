@@ -18,10 +18,14 @@ Panel jest częścią tej samej aplikacji Next.js. Adresy po wdrożeniu:
 | `NEXT_PUBLIC_SUPABASE_URL` | URL istniejącego projektu |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | istniejący klucz publiczny |
 | `SUPABASE_SECRET_KEY` | sekret serwerowy Supabase; alternatywnie `SUPABASE_SERVICE_ROLE_KEY` dla starszego klucza |
+| `ADMIN_DIGITALOCEAN_WRITE_URL` | adres `https://baza-api.otwartestoki.pl/api/digitalocean-write` |
+| `ADMIN_DIGITALOCEAN_WRITE_TOKEN` | wspólny token odbiornika, taki sam jak `ADMIN_DIGITALOCEAN_RECEIVE_TOKEN` na Droplecie |
 | `ADMIN_EMAILS` | zatwierdzony e-mail administratora; kolejne oddziel przecinkami |
 | `ADMIN_REVISION_SECRET` | opcjonalny niezależny losowy sekret do podpisywania wersji wpisów |
 
 Sekretów nie dodawaj do zmiennych z prefiksem `NEXT_PUBLIC_`, kodu ani GitHub. Skonfiguruj właściwe środowisko Vercel i wykonaj redeploy. Do podglądu PR ustaw osobno zmienne Preview; zalecana jest osobna testowa baza.
+
+Każdy zapis administratora jest wysyłany niezależnie do Supabase i Dropleta i weryfikowany odczytem. Panel pokazuje wynik każdego zapisu osobno. Niepowodzenie jednej bazy nie zatrzymuje drugiej.
 
 ## Raport i zapisy
 
