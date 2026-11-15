@@ -7,7 +7,13 @@ import type { DatabaseSource, Row } from "./types";
 import { utcTimestamp } from "../skiAvailability";
 import { digitalOceanRead, digitalOceanWriter } from "./digitalocean";
 
-function secret() { const s = process.env.ADMIN_REVISION_SECRET || process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.ADMIN_DIGITALOCEAN_WRITE_TOKEN; if (!s) throw new HttpError(503,"Brak konfiguracji serwera."); return s; }
+function secret() {
+  const s = process.env.ADMIN_REVISION_SECRET || (process.env.ADMIN_DATABASE_MODE === "droplet"
+    ? process.env.ADMIN_DIGITALOCEAN_WRITE_TOKEN
+    : process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.ADMIN_DIGITALOCEAN_WRITE_TOKEN);
+  if (!s) throw new HttpError(503,"Brak konfiguracji serwera.");
+  return s;
+}
 const dropletOnly = () => process.env.ADMIN_DATABASE_MODE === "droplet";
 function signature(s: string) { return createHmac("sha256",secret()).update(s).digest("base64url"); }
 type RevisionState = { table: string; source: DatabaseSource; records: Record<DatabaseSource, Row | null>; expires: number };
