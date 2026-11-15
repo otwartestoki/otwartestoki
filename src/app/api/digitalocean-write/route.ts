@@ -6,6 +6,131 @@ import { utcTimestamp } from "@/lib/skiAvailability";
 
 export const runtime = "nodejs";
 
+const UUID_RE=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+function omitFields<T extends Record<string, unknown>>(row:T,...keys:string[]) { const copy={...row}; for(const key of keys) delete copy[key]; return copy; }
+
+async function logSkipassAction(db: ReturnType<typeof adminClient>, actor: string, table: string, identity: Record<string, unknown>, before: unknown, changes: Record<string, unknown>) {
+  const { data, error } = await db.from("admin_audit").insert({ actor, table_name: table, identity, before, changes, state: "prepared" }).select("id").single();
+  if (error || !data) throw new Error("Nie udało się zapisać operacji w historii.");
+  return data.id as string;
+}
+
+async function skipassAdmin(db: ReturnType<typeof adminClient>, payload: Record<string, unknown>) {
+  const actor=typeof payload.actor==="string"&&UUID_RE.test(payload.actor)?payload.actor:null;
+  if(!actor) return new Response(null,{status:400});
+
+  if(payload.action==="add-product") {
+    const name=String(payload.name??"").trim(),season=String(payload.season_label??"").trim();
+    if(!name||name.length>200||!season||season.length>40) return new Response(null,{status:400});
+    const row={id:crypto.randomUUID(),name,provider:typeof payload.provider==="string"?payload.provider.trim().slice(0,200)||null:null,pass_type:typeof payload.pass_type==="string"?payload.pass_type.trim().slice(0,120)||null:null,currency:"PLN",url:null,season_label:season,notes:null,last_checked_at:null};
+    const auditId=await logSkipassAction(db,actor,"skipass_products",{id:row.id},null,{created:row});
+    const inserted=await db.from("skipass_products").insert(row).select("*").single();
+    if(inserted.error||!inserted.data) { await db.from("admin_audit").update({state:"unverified"}).eq("id",auditId); return new Response(null,{status:502}); }
+    await db.from("admin_audit").update({state:"verified",after:inserted.data}).eq("id",auditId);
+    return Response.json({product:inserted.data});
+  }
+
+  if(payload.action==="copy-season") {
+    const sourceId=String(payload.source_product_id??"");
+    const season=String(payload.target_season??"").trim();
+    if(!UUID_RE.test(sourceId)||!season||season.length>40) return new Response(null,{status:400});
+    const {data:source,error:sourceError}=await db.from("skipass_products").select("*").eq("id",sourceId).maybeSingle();
+    if(sourceError||!source) return new Response(null,{status:404});
+    let dupeQuery=db.from("skipass_products").select("id").eq("name",source.name).eq("season_label",season);
+    dupeQuery=source.provider==null?dupeQuery.is("provider",null):dupeQuery.eq("provider",source.provider);
+    dupeQuery=source.pass_type==null?dupeQuery.is("pass_type",null):dupeQuery.eq("pass_type",source.pass_type);
+    const {data:dupe,error:dupeError}=await dupeQuery.limit(1);
+    if(dupeError) return new Response(null,{status:502});
+    if(dupe?.length) return new Response(null,{status:409});
+    const [coverageRead,priceRead]=await Promise.all([
+      db.from("skipass_coverage").select("*").eq("skipass_product_id",sourceId),
+      db.from("skipass_prices").select("*").eq("skipass_product_id",sourceId),
+    ]);
+    if(coverageRead.error||priceRead.error) return new Response(null,{status:502});
+    const id=crypto.randomUUID();
+    const productFields=omitFields(source,"created_at","last_checked_at");
+    const product={...productFields,id,season_label:season,last_checked_at:null};
+    const newCoverage=(coverageRead.data??[]).map((row:Record<string,unknown>)=>({...omitFields(row,"created_at"),skipass_product_id:id}));
+    // Carry over variants as empty, undated drafts so last season's prices never appear as current.
+    const newPrices=(priceRead.data??[]).map((row:Record<string,unknown>)=>({...omitFields(row,"created_at"),id:crypto.randomUUID(),skipass_product_id:id,price:null,valid_from:null,valid_to:null,last_checked_at:null}));
+    const auditId=await logSkipassAction(db,actor,"skipass_products",{id},null,{copied_from:sourceId,source_season:source.season_label,target_season:season,copied_coverage:newCoverage.length,price_drafts:newPrices.length});
+    let productCreated=false;
+    try {
+      const inserted=await db.from("skipass_products").insert(product).select("*").single();
+      if(inserted.error||!inserted.data) throw new Error("product insert failed");
+      productCreated=true;
+      if(newCoverage.length) { const result=await db.from("skipass_coverage").insert(newCoverage); if(result.error) throw new Error("coverage insert failed"); }
+      if(newPrices.length) { const result=await db.from("skipass_prices").insert(newPrices); if(result.error) throw new Error("price insert failed"); }
+      const [{data:verifyProduct,error:verifyProductError},{count:coverageCount,error:coverageError},{count:priceCount,error:priceError}]=await Promise.all([
+        db.from("skipass_products").select("id").eq("id",id).maybeSingle(),
+        db.from("skipass_coverage").select("resort_id",{count:"exact",head:true}).eq("skipass_product_id",id),
+        db.from("skipass_prices").select("id",{count:"exact",head:true}).eq("skipass_product_id",id),
+      ]);
+      const verified=!!verifyProduct&&!verifyProductError&&!coverageError&&!priceError&&coverageCount===newCoverage.length&&priceCount===newPrices.length;
+      await db.from("admin_audit").update({state:verified?"verified":"unverified",after:{id,season_label:season,coverage_count:coverageCount,price_draft_count:priceCount}}).eq("id",auditId);
+      if(!verified) throw new Error("copy readback failed");
+      return Response.json({product:inserted.data,coverage_count:coverageCount,price_draft_count:priceCount});
+    } catch {
+      if(productCreated) {
+        await db.from("skipass_prices").delete().eq("skipass_product_id",id);
+        await db.from("skipass_coverage").delete().eq("skipass_product_id",id);
+        await db.from("skipass_products").delete().eq("id",id);
+      }
+      await db.from("admin_audit").update({state:"unverified"}).eq("id",auditId);
+      return new Response(null,{status:502});
+    }
+  }
+
+  if(payload.action==="add-price") {
+    const productId=String(payload.skipass_product_id??"");
+    if(!UUID_RE.test(productId)) return new Response(null,{status:400});
+    const {data:product,error:productError}=await db.from("skipass_products").select("id").eq("id",productId).maybeSingle();
+    if(productError||!product) return new Response(null,{status:404});
+    const row={id:crypto.randomUUID(),skipass_product_id:productId,category:"Dorośli",duration_value:1,duration_unit:"day",price:null,price_type:null,day_type:null,valid_from:null,valid_to:null,source_url:null,last_checked_at:null};
+    const auditId=await logSkipassAction(db,actor,"skipass_prices",{id:row.id},null,{skipass_product_id:productId,created_as_empty_draft:true});
+    const inserted=await db.from("skipass_prices").insert(row).select("*").single();
+    if(inserted.error||!inserted.data) { await db.from("admin_audit").update({state:"unverified"}).eq("id",auditId); return new Response(null,{status:502}); }
+    await db.from("admin_audit").update({state:"verified",after:inserted.data}).eq("id",auditId);
+    return Response.json({record:inserted.data});
+  }
+
+  if(payload.action==="add-coverage") {
+    const productId=String(payload.skipass_product_id??""),rawResortId=String(payload.resort_id??"");
+    if(!UUID_RE.test(productId)||!rawResortId||rawResortId.length>200) return new Response(null,{status:400});
+    const resortId=/^\d+$/.test(rawResortId)?Number(rawResortId):rawResortId;
+    const [{data:product},{data:resort},{data:existing}]=await Promise.all([
+      db.from("skipass_products").select("id").eq("id",productId).maybeSingle(),
+      db.from("resorts").select("id").eq("id",resortId).maybeSingle(),
+      db.from("skipass_coverage").select("resort_id").eq("skipass_product_id",productId).eq("resort_id",resortId).maybeSingle(),
+    ]);
+    if(!product||!resort) return new Response(null,{status:404});
+    if(existing) return new Response(null,{status:409});
+    const row={skipass_product_id:productId,resort_id:resortId,coverage_type:typeof payload.coverage_type==="string"?payload.coverage_type:"regional",notes:null};
+    const auditId=await logSkipassAction(db,actor,"skipass_coverage",{skipass_product_id:productId,resort_id:resortId},null,row);
+    const inserted=await db.from("skipass_coverage").insert(row).select("*").single();
+    if(inserted.error||!inserted.data) { await db.from("admin_audit").update({state:"unverified"}).eq("id",auditId); return new Response(null,{status:502}); }
+    await db.from("admin_audit").update({state:"verified",after:inserted.data}).eq("id",auditId);
+    return Response.json({record:inserted.data});
+  }
+
+  if(payload.action==="remove-coverage") {
+    const productId=String(payload.skipass_product_id??""),rawResortId=String(payload.resort_id??"");
+    if(!UUID_RE.test(productId)||!rawResortId||rawResortId.length>200) return new Response(null,{status:400});
+    const resortId=/^\d+$/.test(rawResortId)?Number(rawResortId):rawResortId;
+    const {data:before,error:readError}=await db.from("skipass_coverage").select("*").eq("skipass_product_id",productId).eq("resort_id",resortId).maybeSingle();
+    if(readError||!before) return new Response(null,{status:404});
+    const auditId=await logSkipassAction(db,actor,"skipass_coverage",{skipass_product_id:productId,resort_id:resortId},before,{removed:true});
+    const result=await db.from("skipass_coverage").delete().eq("skipass_product_id",productId).eq("resort_id",resortId).select("resort_id");
+    if(result.error||!result.data?.length) { await db.from("admin_audit").update({state:"unverified"}).eq("id",auditId); return new Response(null,{status:502}); }
+    const verify=await db.from("skipass_coverage").select("resort_id").eq("skipass_product_id",productId).eq("resort_id",resortId).maybeSingle();
+    const verified=!verify.error&&!verify.data;
+    await db.from("admin_audit").update({state:verified?"verified":"unverified",after:null}).eq("id",auditId);
+    return verified?Response.json({removed:true}):new Response(null,{status:502});
+  }
+
+  return new Response(null,{status:400});
+}
+
 function equal(key: string, left: unknown, right: unknown) {
   if (typeof left === "string" && typeof right === "string" &&
       ["updated_at", "last_checked_at"].includes(key)) {
@@ -55,6 +180,7 @@ export async function POST(request: Request) {
       if (error) return new Response(null, { status: 502 });
       return Response.json({ rows: data ?? [] }, { headers: { "Cache-Control": "no-store" } });
     }
+    if(payload.operation==="skipass-admin") return await skipassAdmin(db,payload);
     if (payload.operation === "public") {
       const action = payload.action;
       if (action === "updated-at") {

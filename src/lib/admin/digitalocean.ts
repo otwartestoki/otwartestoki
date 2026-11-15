@@ -62,3 +62,22 @@ export async function digitalOceanAuth<T>(action: string, payload: Record<string
   if (!response.ok) throw new HttpError(503, "Droplet nie potwierdził operacji logowania.", "AUTH_UNAVAILABLE");
   return response.json() as Promise<T>;
 }
+
+export async function digitalOceanSkipass<T>(action: string, payload: Record<string, unknown>): Promise<T> {
+  const endpoint = process.env.ADMIN_DIGITALOCEAN_WRITE_URL;
+  const token = process.env.ADMIN_DIGITALOCEAN_WRITE_TOKEN;
+  if (!endpoint || !token || !URL.canParse(endpoint) || new URL(endpoint).protocol !== "https:") {
+    throw new HttpError(503, "Brak konfiguracji zapisu na DigitalOcean.");
+  }
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "skipass-admin", action, ...payload }),
+    cache: "no-store",
+    redirect: "error",
+    signal: AbortSignal.timeout(15000),
+  });
+  if (response.status === 409) throw new HttpError(409, "Zmienił się stan skipassu. Odśwież widok i spróbuj ponownie.");
+  if (!response.ok) throw new HttpError(502, "DigitalOcean nie potwierdził operacji skipassowej.");
+  return response.json() as Promise<T>;
+}

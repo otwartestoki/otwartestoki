@@ -5,7 +5,7 @@ import { closeResortStep, listRecordsBoth, readRecordBoth, readRecordFrom, revis
 import { HttpError, normalizeStatus } from "@/lib/admin/validation";
 import type { DatabaseSource, Row } from "@/lib/admin/types";
 import { checkSource, databaseSnapshot } from "@/lib/admin/collector";
-import { digitalOceanRead } from "@/lib/admin/digitalocean";
+import { digitalOceanRead, digitalOceanSkipass } from "@/lib/admin/digitalocean";
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
 export const maxDuration=30;
@@ -76,6 +76,12 @@ async function handle(request: NextRequest, context: {params:Promise<{path:strin
       }
     }
     else if(path==="history" && request.method==="GET") result=await digitalOceanRead<{rows:Row[]}>({action:"history"});
+    else if(path==="skipasses" && request.method==="POST") {
+      if(process.env.ADMIN_DATABASE_MODE!=="droplet") throw new HttpError(503,"Operacje skipassów są dostępne w trybie DigitalOcean.");
+      const action=String(body.action||"");
+      if(!["add-product","copy-season","add-price","add-coverage","remove-coverage"].includes(action)) throw new HttpError(400,"Nieznana operacja skipassowa.");
+      result=await digitalOceanSkipass(action,{...body,actor:user.id});
+    }
     else throw new HttpError(404,"Nie znaleziono operacji.");
     return NextResponse.json(result,{headers:{"Cache-Control":"private, no-store"}});
   } catch(error) { const e=error instanceof HttpError?error:new HttpError(500,"Nie udało się zakończyć operacji. Odczytaj aktualny stan przed ponowieniem."); return NextResponse.json({error:e.message,code:e.code},{status:e.status,headers:{"Cache-Control":"private, no-store"}}); }
