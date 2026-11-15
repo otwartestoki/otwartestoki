@@ -8,6 +8,8 @@ type Product = Row & { id: string; name?: string; provider?: string; pass_type?:
 type Price = Row & { id: string; skipass_product_id: string; price?: number | null; category?: string; duration_value?: number | null; duration_unit?: string; valid_from?: string | null; valid_to?: string | null };
 type Coverage = Row & { resort_id: string; skipass_product_id: string; coverage_type?: string; notes?: string | null };
 type Resort = Row & { id: string; name?: string; city?: string; region?: string };
+type DatabaseList = { ok: boolean; rows?: Row[]; error?: string };
+type RecordsResponse = { rows?: Row[]; databases?: Partial<Record<"supabase" | "droplet", DatabaseList>> };
 const productFields = [
   ["name", "Nazwa"], ["provider", "Operator"], ["pass_type", "Rodzaj skipassu"],
   ["currency", "Waluta"], ["url", "Strona zakupu"], ["season_label", "Sezon"], ["notes", "Uwagi"],
@@ -31,10 +33,18 @@ const priceIsCurrent = (price: Price) => {
   return price.price != null && (!from || Number.isNaN(from.getTime()) || from <= now) && (!to || Number.isNaN(to.getTime()) || to >= now);
 };
 async function fetchSkipassData() {
-  return Promise.all([
-    api<{rows: Row[]}>("records?table=skipass_products"), api<{rows: Row[]}>("records?table=skipass_prices"),
-    api<{rows: Row[]}>("records?table=skipass_coverage"), api<{rows: Row[]}>("records?table=resorts"),
+  const results = await Promise.all([
+    api<RecordsResponse>("records?table=skipass_products"), api<RecordsResponse>("records?table=skipass_prices"),
+    api<RecordsResponse>("records?table=skipass_coverage"), api<RecordsResponse>("records?table=resorts"),
   ]);
+  return results.map((result) => {
+    const droplet = result.databases?.droplet;
+    if (droplet) {
+      if (!droplet.ok) throw new Error(droplet.error || "Nie udało się odczytać tabeli z DigitalOcean.");
+      return droplet.rows || [];
+    }
+    return result.rows || [];
+  });
 }
 
 export function SkipassManager() {
@@ -69,9 +79,9 @@ export function SkipassManager() {
   async function load(keepSeason = true) {
     setLoading(true);
     try {
-      const [p, pr, c, r] = await fetchSkipassData();
-      const nextProducts = p.rows as Product[];
-      setProducts(nextProducts); setPrices(pr.rows as Price[]); setCoverage(c.rows as Coverage[]); setResorts(r.rows as Resort[]);
+      const [productRows, priceRows, coverageRows, resortRows] = await fetchSkipassData();
+      const nextProducts = productRows as Product[];
+      setProducts(nextProducts); setPrices(priceRows as Price[]); setCoverage(coverageRows as Coverage[]); setResorts(resortRows as Resort[]);
       setSeason(current => keepSeason && current && nextProducts.some(row => row.season_label === current) ? current : current || nextProducts.map(row => txt(row.season_label)).filter(Boolean).sort().reverse()[0] || "");
       if (selected) setSelected(nextProducts.find(row => row.id === selected.id) || null);
     } catch (error) { setMessage((error as Error).message); }
@@ -79,10 +89,10 @@ export function SkipassManager() {
   }
   useEffect(() => {
     let active=true;
-    void fetchSkipassData().then(([p,pr,c,r])=>{
+    void fetchSkipassData().then(([productRows,priceRows,coverageRows,resortRows])=>{
       if(!active)return;
-      const nextProducts=p.rows as Product[];
-      setProducts(nextProducts);setPrices(pr.rows as Price[]);setCoverage(c.rows as Coverage[]);setResorts(r.rows as Resort[]);
+      const nextProducts=productRows as Product[];
+      setProducts(nextProducts);setPrices(priceRows as Price[]);setCoverage(coverageRows as Coverage[]);setResorts(resortRows as Resort[]);
       setSeason(current=>current||nextProducts.map(row=>txt(row.season_label)).filter(Boolean).sort().reverse()[0]||"");
     }).catch(error=>{if(active)setMessage((error as Error).message);}).finally(()=>{if(active)setLoading(false);});
     return()=>{active=false;};
