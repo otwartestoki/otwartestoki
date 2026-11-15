@@ -36,11 +36,13 @@ export async function saveRecord(table: string, token: string, input: unknown, u
   let mirrorError: unknown;
   try { mirror = digitalOceanWriter(); } catch (error) { mirrorError = error; }
   const identity = Object.fromEntries(spec.keys.map(key => [key, before[key]]));
-  const db=adminClient(); const {data:audit,error:auditError}=await db.from("admin_audit").insert({actor:userId,table_name:table,identity,before,changes,state:"prepared"}).select("id").single(); if(auditError) dbFailure(auditError);
   const patch={...changes}; if("updated_at" in before) patch.updated_at=new Date().toISOString();
-  let q=db.from(table).update(patch);
-  for(const [k,v] of Object.entries(before)) { if(v===null) q=q.is(k,null); else if(typeof v!=="object") q=q.eq(k,v); }
   const writeLocal = async () => {
+    const db=adminClient();
+    const {data:audit,error:auditError}=await db.from("admin_audit").insert({actor:userId,table_name:table,identity,before,changes,state:"prepared"}).select("id").single();
+    if(auditError) dbFailure(auditError);
+    let q=db.from(table).update(patch);
+    for(const [k,v] of Object.entries(before)) { if(v===null) q=q.is(k,null); else if(typeof v!=="object") q=q.eq(k,v); }
     const {data,error}=await q.select();
     if(error) { await db.from("admin_audit").update({state:"unverified"}).eq("id",audit.id); dbFailure(error); }
     if(data.length!==1) { await db.from("admin_audit").update({state:"conflict"}).eq("id",audit.id); throw new HttpError(409,"Wpis zmienił się w bazie. Odczytaj go ponownie."); }
