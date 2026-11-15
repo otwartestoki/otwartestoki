@@ -25,9 +25,55 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 100000) return new Response(null, { status: 413 });
     const payload = JSON.parse(raw);
+    const db = adminClient();
+    if (payload.operation === "public") {
+      const action = payload.action;
+      if (action === "updated-at") {
+        const { data, error } = await db.from("resorts_public_list").select("resort_updated_at")
+          .not("resort_updated_at", "is", null).order("resort_updated_at", { ascending: false }).limit(1);
+        if (error) return new Response(null, { status: 502 });
+        return Response.json({ data: data?.[0]?.resort_updated_at ?? null }, { headers: { "Cache-Control": "no-store" } });
+      }
+      if (action === "search") {
+        if (!payload.params || typeof payload.params !== "object") return new Response(null, { status: 400 });
+        const { data, error } = await db.rpc("resorts_public_list_search_v3", payload.params);
+        if (error) return new Response(null, { status: 502 });
+        return Response.json({ data: data ?? [] }, { headers: { "Cache-Control": "no-store" } });
+      }
+      if (action === "slopes-inventory") {
+        const rows = [];
+        for (let start = 0; start < 50000; start += 1000) {
+          const { data, error } = await db.from("slopes").select("id,resort,status").order("id").range(start, start + 999);
+          if (error) return new Response(null, { status: 502 });
+          rows.push(...data);
+          if (data.length < 1000) return Response.json({ data: rows }, { headers: { "Cache-Control": "no-store" } });
+        }
+        return new Response(null, { status: 413 });
+      }
+      if (action === "resort-detail") {
+        const id = String(payload.id ?? "");
+        if (!/^\d{1,12}$/.test(id)) return new Response(null, { status: 400 });
+        const [pub, base, slopes, lifts, coverage] = await Promise.all([
+          db.from("resorts_public_list").select("id,name,region,city,country,resort_updated_at,resort_stats(slopes_open,slopes_total,open_km,total_km,lifts_open,lifts_total,skipass_price,skipass_currency,skipass_url,skipass_label,stats_updated_at)").eq("id", id).maybeSingle(),
+          db.from("resorts").select("id,url,trail_map_url,webcam_url").eq("id", id).maybeSingle(),
+          db.from("slopes").select("id,number,resort,sector,name,difficulty,length_m,snow,light,status,updated_at").eq("resort", id).order("number"),
+          db.from("lifts").select("id,resort,number,name,type,seats,capacity_pph,length_m,status,updated_at").eq("resort", id).order("number"),
+          db.from("skipass_coverage").select("resort_id,skipass_product_id,coverage_type,notes,created_at,skipass_products(id,name,provider,pass_type,currency,notes,url,season_label,last_checked_at,created_at)").eq("resort_id", id),
+        ]);
+        if (pub.error || base.error || slopes.error || lifts.error || coverage.error) return new Response(null, { status: 502 });
+        const productIds = [...new Set((coverage.data ?? []).map(row => row.skipass_product_id).filter(Boolean))];
+        let prices: unknown[] = [];
+        if (productIds.length) {
+          const result = await db.from("skipass_prices").select("id,skipass_product_id,category,duration_value,duration_unit,price,price_type,day_type,valid_from,valid_to,source_url,last_checked_at,created_at").in("skipass_product_id", productIds).not("price", "is", null);
+          if (result.error) return new Response(null, { status: 502 });
+          prices = result.data ?? [];
+        }
+        return Response.json({ data: { resort: pub.data ? { ...pub.data, ...(base.data ?? {}) } : null, slopes: slopes.data ?? [], lifts: lifts.data ?? [], coverage: coverage.data ?? [], prices } }, { headers: { "Cache-Control": "no-store" } });
+      }
+      return new Response(null, { status: 400 });
+    }
     const { table } = payload;
     const spec = tableSchema(table);
-    const db = adminClient();
     if (payload.operation === "read") {
       if (payload.action === "list") {
         const rows = [];

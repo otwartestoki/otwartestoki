@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabaseClient";
+import { publicData } from "@/lib/publicData";
 import { normalizeSkiStatus, publicSkiStatus, summarizeSlopes, type SlopeAvailability } from "@/lib/skiAvailability";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -316,20 +316,12 @@ export default function HomeClient() {
   const maxOpenKmForSlider = 3;
 
   async function loadGlobalDataUpdatedAt() {
-    const { data, error } = await supabase
-      .from("resorts_public_list")
-      .select("resort_updated_at")
-      .not("resort_updated_at", "is", null)
-      .order("resort_updated_at", { ascending: false })
-      .limit(1);
-
-    if (error) {
+    try {
+      setGlobalDataUpdatedAt(await publicData<string | null>("updated-at"));
+    } catch (error) {
       console.warn("[loadGlobalDataUpdatedAt]", error);
       setGlobalDataUpdatedAt(null);
-      return;
     }
-
-    setGlobalDataUpdatedAt((data as any)?.[0]?.resort_updated_at ?? null);
   }
 
   // ✅ Tiles (Otwarte/Zamknięte) liczymy na podstawie przefiltrowanych wyników w `load()`
@@ -346,7 +338,7 @@ export default function HomeClient() {
       let baseRows: ResortRow[] = [];
 
       if (!isMultiDifficulty) {
-        const { data, error } = await supabase.rpc("resorts_public_list_search_v3", {
+        const data = await publicData<ResortRow[]>("search", { params: {
           p_q: q.trim().length ? q.trim() : null,
           p_status: "all",
           p_difficulty: difficulty.length === 1 ? difficulty[0] : null,
@@ -362,16 +354,14 @@ export default function HomeClient() {
           // bierzemy więcej, bo paginujemy lokalnie (szczególnie gdy dochodzą filtry multi)
           p_limit: 2000,
           p_offset: 0,
-        });
-
-        if (error) throw error;
-        baseRows = ((data ?? []) as any) as ResortRow[];
+        } });
+        baseRows = data ?? [];
       } else {
         // ✅ wiele kolorów: pobieramy per kolor i sumujemy statystyki (open_km / total_km / slopes)
         const diffs = difficulty;
         const calls = await Promise.all(
           diffs.map((d) =>
-            supabase.rpc("resorts_public_list_search_v3", {
+            publicData<ResortRow[]>("search", { params: {
               p_q: q.trim().length ? q.trim() : null,
               p_status: "all",
               p_difficulty: d,
@@ -383,19 +373,15 @@ export default function HomeClient() {
               p_min_open_km: null,
               p_limit: 2000,
               p_offset: 0,
-            })
+            } })
           )
         );
-
-        for (const res of calls) {
-          if (res.error) throw res.error;
-        }
 
         // merge po id
         const merged = new Map<string, ResortRow>();
 
         for (const res of calls) {
-          const list = ((res.data ?? []) as any) as ResortRow[];
+          const list = res ?? [];
           for (const r of list) {
             const key = String(r.id);
             const prev = merged.get(key);
@@ -425,14 +411,7 @@ export default function HomeClient() {
 
       // Use the complete ski-run inventory, regardless of the active difficulty filter.
       // The manual resort flag and tourist lifts do not prove that skiing is available.
-      const slopeInventory: SlopeAvailability[] = [];
-      for (let offset = 0; ; offset += 1000) {
-        const result = await supabase.from("slopes").select("id,resort,status").order("id").range(offset, offset + 999);
-        if (result.error) throw result.error;
-        slopeInventory.push(...result.data);
-        if (result.data.length < 1000) break;
-        if (offset >= 49000) throw new Error("Nie udało się potwierdzić kompletności danych tras.");
-      }
+      const slopeInventory = await publicData<SlopeAvailability[]>("slopes-inventory");
       const skiing = summarizeSlopes(slopeInventory);
       baseRows = baseRows.map(row => {
         const status = publicSkiStatus(row.status_norm, row.last_checked_at, skiing.get(String(row.id)));

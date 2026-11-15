@@ -35,7 +35,7 @@ export async function digitalOceanRead<T>(request: Record<string, unknown>): Pro
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ ...request, operation: "read" }),
+    body: JSON.stringify({ ...request, operation: request.operation === "public" ? "public" : "read" }),
     cache: "no-store",
     redirect: "error",
     signal: AbortSignal.timeout(12000),

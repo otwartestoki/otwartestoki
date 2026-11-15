@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { publicData } from "@/lib/publicData";
 
 /* ===================== TYPES ===================== */
 
@@ -471,29 +471,7 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
   // ✅ jedyna aktualizacja na stronie resortu
   const upd = resort?.resort_updated_at ?? null;
 
-  async function loadSkipasses(resortUuid: string) {
-    const cov = await supabase
-      .from("skipass_coverage")
-      .select(
-        `
-        resort_id,
-        skipass_product_id,
-        coverage_type,
-        notes,
-        created_at,
-        skipass_products (
-          id, name, provider, pass_type, currency, notes, url, season_label, last_checked_at, created_at
-        )
-      `
-      )
-      .eq("resort_id", resortUuid);
-
-    if (cov.error) {
-      setSkipassRows([]);
-      return;
-    }
-
-    const covRows = (cov.data ?? []) as any as SkipassCoverageRow[];
+  async function loadSkipasses(covRows: SkipassCoverageRow[], allPricesRaw: SkipassPrice[]) {
 
     const products: SkipassProduct[] = [];
     for (const r of covRows) {
@@ -515,22 +493,6 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
       return;
     }
 
-    const ids = uniqProducts.map((p) => p.id);
-
-    const pricesRes = await supabase
-      .from("skipass_prices")
-      .select(
-        "id,skipass_product_id,category,duration_value,duration_unit,price,price_type,day_type,valid_from,valid_to,source_url,last_checked_at,created_at"
-      )
-      .in("skipass_product_id", ids)
-      .not("price", "is", null);
-
-    if (pricesRes.error) {
-      setSkipassRows([]);
-      return;
-    }
-
-    const allPricesRaw = (pricesRes.data ?? []) as any as SkipassPrice[];
     const today = new Date();
     const allPrices = allPricesRaw.filter((p) => isValidInRange(p, today));
 
@@ -592,45 +554,20 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
     setError(null);
 
     // 1) ✅ bierzemy aktualizację + dane UI z VIEW (jak na głównej)
-    const pub = await supabase
-      .from("resorts_public_list")
-      .select(
-        `
-        id,
-        name,
-        region,
-        city,
-        country,
-        resort_updated_at,
-        resort_stats (
-          slopes_open,
-          slopes_total,
-          open_km,
-          total_km,
-          lifts_open,
-          lifts_total,
-          skipass_price,
-          skipass_currency,
-          skipass_url,
-          skipass_label,
-          stats_updated_at
-        )
-      `
-      )
-      .eq("id", String(resortId))
-      .maybeSingle();
-
-    if (pub.error) {
+    let detail: { resort: Resort | null; slopes: Slope[]; lifts: Lift[]; coverage: SkipassCoverageRow[]; prices: SkipassPrice[] };
+    try {
+      detail = await publicData("resort-detail", { id: String(resortId) });
+    } catch (error) {
       setResort(null);
       setSlopes([]);
       setLifts([]);
       setSkipassRows([]);
-      setError(pub.error.message);
+      setError(error instanceof Error ? error.message : "Nie udało się pobrać danych ośrodka.");
       setLoading(false);
       return;
     }
 
-    if (!pub.data) {
+    if (!detail.resort) {
       setResort(null);
       setSlopes([]);
       setLifts([]);
@@ -640,22 +577,7 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
       return;
     }
 
-    // 2) ✅ URL mapy/kamer/strony z tabeli resorts (bo view ich nie ma)
-    const base = await supabase
-      .from("resorts")
-      .select("id,url,trail_map_url,webcam_url")
-      .eq("id", String(resortId))
-      .maybeSingle();
-
-    if (base.error) {
-      // nie blokujemy całej strony – brak url-i to nie dramat
-      console.warn("[resorts base]", base.error);
-    }
-
-    const merged: Resort = {
-      ...(pub.data as any),
-      ...(base.data as any),
-    };
+    const merged: Resort = detail.resort;
 
     setResort(merged);
 
@@ -663,31 +585,9 @@ function scrollToSection(ref: React.RefObject<HTMLDivElement | null>) {
     const canonical = `${resortSlug(merged)}--${(merged as any).id}`;
     if (rawParam && rawParam !== canonical) router.replace(`/resort/${canonical}`);
 
-    await loadSkipasses(String((merged as any).id));
-
-    const s = await supabase
-      .from("slopes")
-      .select("id,number,resort,sector,name,difficulty,length_m,snow,light,status,updated_at")
-      .eq("resort", String(resortId))
-      .order("number", { ascending: true });
-
-    if (s.error) {
-      setSlopes([]);
-      setLifts([]);
-      setError(s.error.message);
-      setLoading(false);
-      return;
-    }
-    setSlopes((s.data ?? []) as any);
-
-    const l = await supabase
-      .from("lifts")
-      .select("id,resort,number,name,type,seats,capacity_pph,length_m,status,updated_at")
-      .eq("resort", String(resortId))
-      .order("number", { ascending: true });
-
-    if (l.error) setLifts([]);
-    else setLifts((l.data ?? []) as any);
+    await loadSkipasses(detail.coverage, detail.prices);
+    setSlopes(detail.slopes);
+    setLifts(detail.lifts);
 
     setLoading(false);
   }
