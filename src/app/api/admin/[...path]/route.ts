@@ -49,7 +49,10 @@ async function handle(request: NextRequest, context: {params:Promise<{path:strin
       const records:Record<DatabaseSource,Row|null>={supabase:databases.supabase.ok?databases.supabase.record:null,droplet:databases.droplet.ok?databases.droplet.record:null};
       result={record:row,revision:row?revisionFor(body.table,records,source):null,database:source,databases};
     }
-    else if(path==="save" && request.method==="POST") result=await saveRecord(body.table,String(body.revision||""),body.changes,user.id);
+    else if(path==="save" && request.method==="POST") {
+      if(body.database!=="supabase"&&body.database!=="droplet"&&body.database!=="both") throw new HttpError(400,"Wybierz bazę docelową zapisu.");
+      result=await saveRecord(body.table,String(body.revision||""),body.changes,user.id,false,body.database);
+    }
     else if(path==="confirm-resort" && request.method==="POST") result=body.status === "zamknięty" ? await closeResortStep(String(body.revision||""),user.id) : await saveRecord("resorts",String(body.revision||""),{status:body.status},user.id,true);
     else if(path==="proposal" && request.method==="POST") {
       if(!["slopes","lifts"].includes(body.table) || !["open","closed"].includes(body.target)) throw new HttpError(400,"Nieprawidłowa propozycja.");
@@ -64,7 +67,7 @@ async function handle(request: NextRequest, context: {params:Promise<{path:strin
         const records:Record<DatabaseSource,Row|null>={supabase:databases.supabase.ok?databases.supabase.record:null,droplet:databases.droplet.ok?databases.droplet.record:null};
         const selected=records[source];
         if(!selected||Object.entries(row).some(([key,value])=>JSON.stringify(selected[key])!==JSON.stringify(value))) throw new HttpError(409,"Wybrana baza zmieniła się podczas zapisu. Odczytaj ją ponownie.");
-        result=await saveRecord(body.table,revisionFor(body.table,records,source),{status:body.target==="open"?"otwarta":"zamknięta"},user.id);
+        result=await saveRecord(body.table,revisionFor(body.table,records,source),{status:body.target==="open"?"otwarta":"zamknięta"},user.id,false,source);
       }
     }
     else if(path==="history" && request.method==="GET") { const {data,error}=await adminClient().from("admin_audit").select("*").order("created_at",{ascending:false}).limit(200); if(error) dbFailure(error); result={rows:data}; }

@@ -72,7 +72,7 @@ export async function readRecordFrom(table: string, identity: unknown, source: D
   if(!result.record) throw new HttpError(404,"Nie znaleziono wpisu w wybranej bazie.");
   return result.record;
 }
-export async function saveRecord(table: string, token: string, input: unknown, userId: string, confirmResortStatus = false) {
+export async function saveRecord(table: string, token: string, input: unknown, userId: string, confirmResortStatus = false, target: DatabaseSource | "both" = "both") {
   const spec=tableSchema(table), state=decode(token,table), before=state.records[state.source];
   if(!before) throw new HttpError(409,"Wpis nie istnieje w wybranej bazie. Odczytaj go ponownie.");
   const changes=validateChanges(spec,input,before);
@@ -104,20 +104,19 @@ export async function saveRecord(table: string, token: string, input: unknown, u
     return current;
   };
     const [supabase, digitalOcean] = await Promise.allSettled([
-      writeLocal(),
-      mirror ? mirror(table, identity, dropletBefore, patch) : Promise.reject(mirrorError instanceof Error ? mirrorError : new Error("Brak konfiguracji zapisu na DigitalOcean.")),
+      target === "droplet" ? Promise.reject(new Error("Pominięto zgodnie z wyborem.")) : writeLocal(),
+      target === "supabase" ? Promise.reject(new Error("Pominięto zgodnie z wyborem.")) : mirror ? mirror(table, identity, dropletBefore, patch) : Promise.reject(mirrorError instanceof Error ? mirrorError : new Error("Brak konfiguracji zapisu na DigitalOcean.")),
     ]);
-    const writes = [
-      {database:"supabase" as const,ok:supabase.status==="fulfilled",message:supabase.status==="fulfilled"?"Zapis potwierdzony odczytem.":"Supabase nie potwierdził zapisu."},
-      {database:"droplet" as const,ok:digitalOcean.status==="fulfilled",message:digitalOcean.status==="fulfilled"?"Zapis potwierdzony odczytem.":digitalOcean.reason instanceof Error?digitalOcean.reason.message:"Droplet nie potwierdził zapisu."},
-    ];
-    if (supabase.status === "rejected" && digitalOcean.status === "rejected") throw new HttpError(502, "Żadna baza nie potwierdziła zapisu. Sprawdź oba statusy baz przed ponowieniem.", "WRITE_UNCONFIRMED");
+    const writes: {database:DatabaseSource;ok:boolean;message:string}[] = [];
+    if (target !== "droplet") writes.push({database:"supabase",ok:supabase.status==="fulfilled",message:supabase.status==="fulfilled"?"Zapis potwierdzony odczytem.":"Supabase nie potwierdził zapisu."});
+    if (target !== "supabase") writes.push({database:"droplet",ok:digitalOcean.status==="fulfilled",message:digitalOcean.status==="fulfilled"?"Zapis potwierdzony odczytem.":digitalOcean.reason instanceof Error?digitalOcean.reason.message:"Droplet nie potwierdził zapisu."});
+    if (writes.every(write => !write.ok)) throw new HttpError(502, "Wybrana baza nie potwierdziła zapisu. Odczytaj aktualny stan przed ponowieniem.", "WRITE_UNCONFIRMED");
     const records:Record<DatabaseSource,Row|null>={
       supabase:supabase.status==="fulfilled"?supabase.value:supabaseBefore,
       droplet:digitalOcean.status==="fulfilled"?digitalOcean.value:dropletBefore,
     };
     const saved=records[state.source]||records[state.source==="supabase"?"droplet":"supabase"]||{...before,...patch};
-    return {record:saved,revision:revisionFor(table,records,state.source),writes};
+    return {record:saved,records,revision:revisionFor(table,records,state.source),writes};
 }
 
 
